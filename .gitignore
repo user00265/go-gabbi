@@ -1,0 +1,13 @@
+# Key material and signed logs. Test CA material under testdata/ is fake by
+# construction and may be committed.
+*.key
+*.pem
+*.p12
+*.tq8
+!testdata/**/*.key
+!testdata/**/*.pem
+!testdata/**/*.p12
+
+# Credentials and local tool config.
+.netrc
+.mcp.json

@@ -1,0 +1,42 @@
+export GOCACHE := env("GOCACHE", "/tmp/opencode/gocache")
+export CGO_ENABLED := "0"
+
+# List the recipes.
+default:
+    @just --list
+
+# Run golangci-lint (v2 config in .golangci.yml).
+lint:
+    golangci-lint run
+
+# Run the tests.
+test:
+    CGO_ENABLED=0 go test ./...
+
+# Run every fuzz target for 30 seconds each.
+fuzz:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for pkg in $(go list ./...); do
+        for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+            echo "== $pkg $target"
+            go test -run '^$' -fuzz "^${target}\$" -fuzztime=30s "$pkg"
+        done
+    done
+
+# Generate golden fixtures with the pinned tqsl container.
+fixtures:
+    @echo "fixtures: not yet implemented (testing phase)"
+
+# Fail if the global gitignore hides any required path.
+doctor:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    paths="go.mod justfile .golangci.yml .gitignore README.md LICENSE NOTICE doc.go testdata internal .github"
+    git check-ignore -v --no-index $paths
+    status=$?
+    case $status in
+        0) echo "doctor: the paths above are ignored" >&2; exit 1 ;;
+        1) echo "doctor: no required path is ignored" ;;
+        *) echo "doctor: git check-ignore failed (exit $status)" >&2; exit 1 ;;
+    esac

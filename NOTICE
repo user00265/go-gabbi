@@ -1,0 +1,35 @@
+go-gabbi
+Copyright (c) 2026 Elisamuel Resto
+Licensed under the MIT License. See LICENSE.
+
+go-gabbi is an independent project. It is not affiliated with or endorsed
+by ARRL.
+
+------------------------------------------------------------------------
+TrustedQSL configuration data
+------------------------------------------------------------------------
+
+The files testdata/config-11.34.tq6 and testdata/config-11.35.xml (added in
+a later change) are TrustedQSL/ARRL configuration data. They are included
+as test data only and are not part of the library. They are covered by the
+following notice:
+
+Copyright (C) 2001-2015 American Radio Relay League, Inc. All rights
+reserved.
+
+Portions (C) 2003-2026 The TrustedQSL Developers. Please see the AUTHORS.txt
+file for contributors.
+
+5. Disclaimer: This software is provided "as-is" without
+representation, guarantee or warranty of any kind, either express or
+implied, including but not limited to the implied warranties of
+merchantability or of fitness for a particular purpose. The entire
+risk as to the quality and performance of the software is solely
+with you. Should the software prove defective, you (and not the
+American Radio Relay League, its officers, directors, employees or
+agents) assume the entire cost of all necessary servicing, repair or
+correction. In no event will ARRL be liable to you or to any third
+party for any damages, whether direct or indirect, including lost
+profits, lost savings, or other incidental or consequential damages
+arising out of the use or inability to use such software, regardless
+of whether ARRL has been advised of the possibility of such damages.
