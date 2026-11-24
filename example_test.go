@@ -3,16 +3,20 @@ package gabbi_test
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"math/big"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -116,4 +120,99 @@ func ExampleWriter() {
 	// <Rec_Type:8>tSTATION
 	// <Rec_Type:8>tCONTACT
 	// <SIGNDATA:49>EM10DHTRAVISTX20MW1AW14.250SSB2026-11-0115:30:00Z
+}
+
+// memStore is a DupeStore in memory with a simple transaction: Begin
+// snapshots the map and Rollback restores it. Real callers use a database
+// transaction.
+type memStore struct {
+	m, saved map[string]string
+}
+
+func (s *memStore) Get(_ context.Context, k string) (string, bool, error) {
+	v, ok := s.m[k]
+	return v, ok, nil
+}
+
+func (s *memStore) Put(_ context.Context, k, v string) error { s.m[k] = v; return nil }
+
+func (s *memStore) Delete(_ context.Context, k string) error { delete(s.m, k); return nil }
+
+func (s *memStore) Begin() { s.saved = maps.Clone(s.m) }
+
+func (s *memStore) Rollback() { s.m = s.saved }
+
+func ExampleSign_all() {
+	data, err := os.ReadFile("testdata/config-11.35.xml")
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg, err := gabbi.ParseConfig(bytes.NewReader(data))
+	if err != nil {
+		log.Fatal(err)
+	}
+	cred, err := exampleCredential()
+	if err != nil {
+		log.Fatal(err)
+	}
+	st := gabbi.Station{
+		Call:       "KF0TST",
+		DXCC:       291,
+		GridSquare: "EM10dh",
+		Fields:     map[string]string{"US_STATE": "TX", "US_COUNTY": "Travis"},
+	}
+	qso := func(call string, day int) gabbi.QSO {
+		return gabbi.QSO{Call: call, Band: "20M", Mode: "SSB", Freq: "14.250",
+			Time: time.Date(2026, 11, day, 15, 30, 0, 0, time.UTC)}
+	}
+	log1 := []gabbi.QSO{qso("W1AW", 1)}
+	log2 := []gabbi.QSO{qso("W1AW", 1), qso("K1JT", 2)} // W1AW again
+
+	store := &memStore{m: map[string]string{}}
+	sign := func(qsos []gabbi.QSO) {
+		ctx := context.Background()
+		opt := gabbi.SignOptions{Action: gabbi.All, Dupes: store, Ident: gabbi.Ident{Program: "ExampleLog", Version: "1.0"}}
+		for {
+			var out bytes.Buffer // a gzip.Writer over a file, in real use
+			store.Begin()
+			rep, err := gabbi.Sign(ctx, &out, cfg, []gabbi.Credential{cred}, st, slices.Values(qsos), opt)
+			if !rep.Commit {
+				store.Rollback()
+			}
+			if errors.Is(err, gabbi.ErrRestart) {
+				// Discard out and sign everything again, duplicates
+				// included, without the store.
+				fmt.Printf("restart after %d duplicate(s)\n", rep.Duplicates)
+				opt.Restart = true
+				continue
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Printf("signed %d, duplicates %d\n", rep.Signed, rep.Duplicates)
+			for _, line := range strings.Split(out.String(), "\n") {
+				if strings.HasPrefix(line, "<TQSL_IDENT") || strings.HasPrefix(line, "<Rec_Type") {
+					fmt.Println(line)
+				}
+			}
+			return
+		}
+	}
+	sign(log1)
+	sign(log2)
+	fmt.Println("store entries:", len(store.m))
+	// Output:
+	// signed 1, duplicates 0
+	// <TQSL_IDENT:57>ExampleLog 1.0 Lib: V1.0 Config: V11.35 AllowDupes: false
+	// <Rec_Type:5>tCERT
+	// <Rec_Type:8>tSTATION
+	// <Rec_Type:8>tCONTACT
+	// restart after 1 duplicate(s)
+	// signed 2, duplicates 0
+	// <TQSL_IDENT:56>ExampleLog 1.0 Lib: V1.0 Config: V11.35 AllowDupes: true
+	// <Rec_Type:5>tCERT
+	// <Rec_Type:8>tSTATION
+	// <Rec_Type:8>tCONTACT
+	// <Rec_Type:8>tCONTACT
+	// store entries: 1
 }

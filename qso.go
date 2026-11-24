@@ -71,18 +71,8 @@ type NormalizeOptions struct {
 // Field is the GAbbI field name and its Detail is TrustedQSL's message.
 // NormalizeQSO is idempotent: normalizing its result gives the same QSO.
 func (c *Config) NormalizeQSO(q QSO, opt NormalizeOptions) (QSO, error) {
-	// ADIF length limits apply to the raw value, before trimming
-	// (adif.cpp:448-459).
-	for _, f := range [...]struct {
-		name, value string
-	}{
-		{"CALL", q.Call}, {"BAND", q.Band}, {"MODE", q.Mode}, {"SUBMODE", q.Submode},
-		{"FREQ", q.Freq}, {"FREQ_RX", q.FreqRX}, {"BAND_RX", q.BandRX},
-		{"SAT_NAME", q.SatName}, {"PROP_MODE", q.PropMode},
-	} {
-		if len(f.value) > adifMaxLen(f.name) {
-			return QSO{}, qsoErr(f.name, "ADIF field "+f.name+" data length overflow")
-		}
+	if err := precheckQSO(q); err != nil {
+		return QSO{}, err
 	}
 
 	// Trim (tqslconvert.cpp:960-969) and uppercase (tqslconvert.cpp:978,
@@ -103,25 +93,6 @@ func (c *Config) NormalizeQSO(q QSO, opt NormalizeOptions) (QSO, error) {
 		n.SatName = "AO-7"
 	}
 
-	// Required fields (tqslconvert.cpp:1343-1371). FREQ counts as a band
-	// (tqslconvert.cpp:982,992), even one that reads as 0.
-	if n.Call == "" {
-		return QSO{}, qsoErr("CALL", "Invalid contact - QSO does not specify a Callsign")
-	}
-	if n.Band == "" && trimC(q.Freq) == "" {
-		return QSO{}, qsoErr("BAND", "Invalid contact - QSO does not specify a band or frequency")
-	}
-	if n.Mode == "" {
-		return QSO{}, qsoErr("MODE", "Invalid contact - QSO does not specify a mode")
-	}
-	if q.Time.IsZero() {
-		return QSO{}, qsoErr("QSO_DATE", "Invalid contact - QSO does not specify a date")
-	}
-	// tqsl_isDateValid: year 1-9999 (tqsllib.cpp:777-797). Checked before
-	// truncating, so a time just before year 1 cannot round into it.
-	if y := q.Time.UTC().Year(); y < 1 || y > 9999 {
-		return QSO{}, qsoErr("QSO_DATE", "Invalid date format")
-	}
 	n.Time = q.Time.UTC().Truncate(time.Second)
 	if opt.IgnoreSeconds {
 		// tqslconvert.cpp:1022-1023.
@@ -182,6 +153,45 @@ func (c *Config) NormalizeQSO(q QSO, opt NormalizeOptions) (QSO, error) {
 		return QSO{}, qsoErr("SAT_NAME", "SAT_NAME set but PROP_MODE is not 'SAT'")
 	}
 	return n, nil
+}
+
+// precheckQSO runs the checks TrustedQSL makes before its date filter
+// (tqslconvert.cpp:1374-1388): the ADIF length limits, applied to the raw
+// value before trimming (adif.cpp:448-459), then the required fields
+// (tqslconvert.cpp:1343-1371). A QSO that passes has a valid date, so the
+// date filter can be applied to it before the remaining checks.
+func precheckQSO(q QSO) error {
+	for _, f := range [...]struct {
+		name, value string
+	}{
+		{"CALL", q.Call}, {"BAND", q.Band}, {"MODE", q.Mode}, {"SUBMODE", q.Submode},
+		{"FREQ", q.Freq}, {"FREQ_RX", q.FreqRX}, {"BAND_RX", q.BandRX},
+		{"SAT_NAME", q.SatName}, {"PROP_MODE", q.PropMode},
+	} {
+		if len(f.value) > adifMaxLen(f.name) {
+			return qsoErr(f.name, "ADIF field "+f.name+" data length overflow")
+		}
+	}
+	// FREQ counts as a band (tqslconvert.cpp:982,992), even one that reads
+	// as 0.
+	if trimC(q.Call) == "" {
+		return qsoErr("CALL", "Invalid contact - QSO does not specify a Callsign")
+	}
+	if trimC(q.Band) == "" && trimC(q.Freq) == "" {
+		return qsoErr("BAND", "Invalid contact - QSO does not specify a band or frequency")
+	}
+	if trimC(q.Mode) == "" {
+		return qsoErr("MODE", "Invalid contact - QSO does not specify a mode")
+	}
+	if q.Time.IsZero() {
+		return qsoErr("QSO_DATE", "Invalid contact - QSO does not specify a date")
+	}
+	// tqsl_isDateValid: year 1-9999 (tqsllib.cpp:777-797). Checked before
+	// truncating, so a time just before year 1 cannot round into it.
+	if y := q.Time.UTC().Year(); y < 1 || y > 9999 {
+		return qsoErr("QSO_DATE", "Invalid date format")
+	}
+	return nil
 }
 
 // adifMaxLen is the maximum data length, in bytes, TrustedQSL's ADIF reader

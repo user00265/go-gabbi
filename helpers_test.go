@@ -59,6 +59,8 @@ type testCertFields struct {
 	QSONotAfter  string
 	DXCC         string
 	Supersedes   string
+	// NotAfter is the X.509 validity end. Zero means a day from now.
+	NotAfter time.Time
 }
 
 // defaultTestCertFields returns the field values verified on the owner's
@@ -153,11 +155,16 @@ func newTestCert(t testing.TB, ca *x509.Certificate, caKey crypto.Signer, pub cr
 			exts = append(exts, pkix.Extension{Id: e.oid, Value: []byte(e.val)})
 		}
 	}
+	notBefore, notAfter := time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour)
+	if !f.NotAfter.IsZero() {
+		notAfter = f.NotAfter
+		notBefore = notAfter.Add(-48 * time.Hour)
+	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          testSerial(t),
 		Subject:               subject,
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(24 * time.Hour),
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment | x509.KeyUsageKeyEncipherment,
 		BasicConstraintsValid: true,
 		ExtraExtensions:       exts,
