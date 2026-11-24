@@ -10,7 +10,7 @@ import (
 var (
 	// ErrPassword means a PKCS#12 file could not be decrypted with the
 	// supplied password, usually because a password was set on export.
-	ErrPassword = errors.New("gabbi: wrong or missing PKCS#12 password")
+	ErrPassword = errors.New("gabbi: incorrect or missing PKCS#12 password")
 
 	// ErrNoCertificate means the input held no callsign certificate.
 	ErrNoCertificate = errors.New("gabbi: no certificate found")
