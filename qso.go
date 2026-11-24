@@ -1,6 +1,7 @@
 package gabbi
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -48,8 +49,10 @@ type NormalizeOptions struct {
 //     non-breaking space is kept) and CALL, BAND, BAND_RX, MODE, SUBMODE,
 //     PROP_MODE and SAT_NAME are uppercased (ASCII only). SAT_NAME "AO-07"
 //     becomes "AO-7".
-//   - In FREQ and FREQ_RX every '.' after the first is dropped, and a
-//     frequency that reads as 0 is cleared.
+//   - In FREQ and FREQ_RX every '.' after the first is dropped. The result
+//     must then be an ADIF Number: an optional '-', digits and at most one
+//     '.', with at least one digit ("14.074", "5." and ".5" all qualify).
+//     A frequency that reads as 0 is cleared.
 //   - A missing BAND or BAND_RX is inferred from FREQ or FREQ_RX.
 //   - The callsign must look like an amateur callsign, unless
 //     SkipCallCheck is set.
@@ -62,15 +65,27 @@ type NormalizeOptions struct {
 //     with, and only with, PROP_MODE "SAT".
 //   - Time is converted to UTC and truncated to the second.
 //
-// One deliberate deviation: a field that is empty after trimming counts as
-// unset. In TrustedQSL a present but whitespace-only field still counts as
-// set (tqslconvert.cpp:977-987) and fails a later check instead, so the
-// error message can differ.
+// Two deliberate deviations:
+//
+//   - A field that is empty after trimming counts as unset. In TrustedQSL a
+//     present but whitespace-only field still counts as set
+//     (tqslconvert.cpp:977-987) and fails a later check instead, so the
+//     error message can differ.
+//   - The ADIF Number check on FREQ and FREQ_RX (ADIF 3.1.6, Data Types,
+//     Number) is stricter than TrustedQSL, which reads the value with C
+//     atof and so accepts text such as "1e3", "0x1A" or "14,074". atof
+//     would read those differently from the text that gets signed, so
+//     they give an error here (Detail "Invalid FREQ (...): not an ADIF
+//     Number") instead of a signature over a frequency nobody meant.
 //
 // Errors are a [*QSOError] with Index -1 that wraps [ErrInvalidQSO]. Its
 // Field is the GAbbI field name and its Detail is TrustedQSL's message.
 // NormalizeQSO is idempotent: normalizing its result gives the same QSO.
+// A nil Config gives an error wrapping [ErrConfig].
 func (c *Config) NormalizeQSO(q QSO, opt NormalizeOptions) (QSO, error) {
+	if c == nil {
+		return QSO{}, fmt.Errorf("%w: nil Config", ErrConfig)
+	}
 	if err := precheckQSO(q); err != nil {
 		return QSO{}, err
 	}
@@ -83,10 +98,15 @@ func (c *Config) NormalizeQSO(q QSO, opt NormalizeOptions) (QSO, error) {
 		BandRX:   asciiUpper(trimC(q.BandRX)),
 		Mode:     asciiUpper(trimC(q.Mode)),
 		Submode:  asciiUpper(trimC(q.Submode)),
-		Freq:     fixFreq(trimC(q.Freq)),
-		FreqRX:   fixFreq(trimC(q.FreqRX)),
 		PropMode: asciiUpper(trimC(q.PropMode)),
 		SatName:  asciiUpper(trimC(q.SatName)),
+	}
+	var err error
+	if n.Freq, err = normalizeFreq("FREQ", q.Freq); err != nil {
+		return QSO{}, err
+	}
+	if n.FreqRX, err = normalizeFreq("FREQ_RX", q.FreqRX); err != nil {
+		return QSO{}, err
 	}
 	// TLEs call it AO-07; LoTW wants AO-7 (tqslconvert.cpp:1004-1008).
 	if n.SatName == "AO-07" {
@@ -224,17 +244,51 @@ func trimC(s string) string {
 	return strings.Trim(s, " \t\n\v\f\r")
 }
 
+// normalizeFreq normalizes the FREQ or FREQ_RX value raw, whose length
+// precheckQSO has already checked: it trims it, applies fix_freq, checks
+// that the result is an ADIF Number, and clears a value whose atof is 0
+// (tqslconvert.cpp:994-995). An empty value stays empty.
+func normalizeFreq(field, raw string) (string, error) {
+	s := fixFreq(trimC(raw))
+	if s == "" {
+		return "", nil
+	}
+	if !isADIFNumber(s) {
+		return "", qsoErr(field, "Invalid "+field+" ("+trimC(raw)+"): not an ADIF Number")
+	}
+	if atof(s) == 0 {
+		return "", nil
+	}
+	return s, nil
+}
+
 // fixFreq is fix_freq (tqslconvert.cpp:233-250), which drops every '.' after
-// the first, followed by the check that clears a frequency whose atof is 0
-// (tqslconvert.cpp:994-995).
+// the first.
 func fixFreq(s string) string {
 	if i := strings.IndexByte(s, '.'); i >= 0 {
 		s = s[:i+1] + strings.ReplaceAll(s[i+1:], ".", "")
 	}
-	if atof(s) == 0 {
-		return ""
-	}
 	return s
+}
+
+// isADIFNumber reports whether s is an ADIF Number (ADIF 3.1.6, Data
+// Types, Number): an optional '-', then digits with at most one '.', and
+// at least one digit. "5.", ".5" and "-14.074" qualify; "", ".", "+5",
+// "1e3", "0x1A", "inf" and "14,074" do not.
+func isADIFNumber(s string) bool {
+	s = strings.TrimPrefix(s, "-")
+	digits, dots := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= '0' && c <= '9':
+			digits++
+		case c == '.':
+			dots++
+		default:
+			return false
+		}
+	}
+	return digits > 0 && dots <= 1
 }
 
 // checkCallSign is checkCallSign and hasValidCallSignChars

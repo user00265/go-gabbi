@@ -964,10 +964,40 @@ func TestSignNilArguments(t *testing.T) {
 	if _, err := Sign(context.Background(), nil, cfg, nil, usStation(), qs, SignOptions{}); !errors.Is(err, ErrConfig) {
 		t.Errorf("nil writer: err = %v, want ErrConfig", err)
 	}
-	// A nil Credential is never chosen.
-	_, rep, _ := runSign(t, []Credential{{}}, usStation(), []QSO{writerQSO("W1AW", 1)}, SignOptions{})
-	if !errors.Is(rep.Results[0].Err, ErrCertMismatch) {
-		t.Errorf("nil credential: Result.Err = %v", rep.Results[0].Err)
+}
+
+// TestSignBadCredential: Sign checks every credential before the first QSO
+// (Ruling AS), so a bad one stops the run with nothing written and Commit
+// false, whatever its position.
+func TestSignBadCredential(t *testing.T) {
+	good := newTestCredential(t)
+	rsa2048 := newTestKeyBits(t, 2048)
+	for _, tt := range []struct {
+		name  string
+		creds []Credential
+		want  error
+	}{
+		{"nil signer", []Credential{{Cert: good.Cert}}, ErrNoKey},
+		{"rsa 2048", []Credential{{Cert: good.Cert, Signer: rsa2048}}, ErrUnsupportedKey},
+		{"nil cert", []Credential{{Signer: good.Signer}}, ErrNoCertificate},
+		{"empty credential", []Credential{{}}, ErrNoCertificate},
+		{"empty creds", nil, ErrNoCertificate},
+		{"bad before good", []Credential{{Cert: good.Cert}, good}, ErrNoKey},
+		{"good before bad", []Credential{good, {Signer: good.Signer}}, ErrNoCertificate},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, a := range []Action{Compliant, Abort, All} {
+				store := newMapStore()
+				out, rep, err := runSign(t, tt.creds, usStation(), []QSO{writerQSO("W1AW", 1)},
+					SignOptions{Action: a, Dupes: store})
+				if !errors.Is(err, tt.want) {
+					t.Errorf("action %d: err = %v, want %v", a, err, tt.want)
+				}
+				if len(out) != 0 || rep.Commit || len(rep.Results) != 0 || len(store.calls) != 0 {
+					t.Errorf("action %d: wrote %d bytes, report %+v, store calls %v", a, len(out), rep, store.calls)
+				}
+			}
+		})
 	}
 }
 

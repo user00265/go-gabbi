@@ -266,7 +266,6 @@ func TestNormalizeQSOFreqFix(t *testing.T) {
 		{"14.074.5", "14.0745"},
 		{"0", ""},
 		{"0.0", ""},
-		{"abc", ""},
 		{" 14.074 ", "14.074"},
 	} {
 		t.Run(tc.in, func(t *testing.T) {
@@ -289,6 +288,68 @@ func TestNormalizeQSOFreqFix(t *testing.T) {
 			}
 			if got.FreqRX != tc.want {
 				t.Errorf("FreqRX = %q, want %q", got.FreqRX, tc.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeQSOFreqGrammar: after fix_freq, FREQ and FREQ_RX must be an
+// ADIF Number (ADIF 3.1.6, Data Types, Number: "a sequence of one or more
+// Digits representing a decimal number, optionally preceded by a minus sign
+// (ASCII 45) and optionally including a single decimal point (ASCII 46)").
+// This is stricter than tqsl's atof (Ruling AR).
+func TestNormalizeQSOFreqGrammar(t *testing.T) {
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	// Each value goes in FREQ under BAND 20M, where a FREQ outside 20M is
+	// cleared (tqslconvert.cpp:1452-1456), and in FREQ_RX with no BAND_RX,
+	// where BAND_RX is inferred and the value kept unless it reads as 0
+	// (tqslconvert.cpp:994-995, 1235-1236, 1457-1460).
+	for _, tc := range []struct {
+		in               string
+		bad              bool
+		wantFreq, wantRX string
+	}{
+		{in: "14.074", wantFreq: "14.074", wantRX: "14.074"},
+		{in: "14.", wantFreq: "14.", wantRX: "14."},
+		{in: ".5", wantFreq: "", wantRX: ".5"},
+		{in: "5.", wantFreq: "", wantRX: "5."},
+		{in: "14.074.5", wantFreq: "14.0745", wantRX: "14.0745"},
+		{in: "-14.074", wantFreq: "", wantRX: "-14.074"},
+		{in: "0", wantFreq: "", wantRX: ""},
+		{in: "-0.0", wantFreq: "", wantRX: ""},
+		{in: "", wantFreq: "", wantRX: ""},
+		{in: ".", bad: true},
+		{in: "-", bad: true},
+		{in: "1e3", bad: true},
+		{in: "0x1A", bad: true},
+		{in: "inf", bad: true},
+		{in: "14,074", bad: true},
+		{in: "+14.074", bad: true},
+		{in: "14.074abc", bad: true},
+		{in: "abc", bad: true},
+		{in: "14 074", bad: true},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			q := baseQSO()
+			q.Band = "20M"
+			q.Freq = tc.in
+			got, err := cfg.NormalizeQSO(q, NormalizeOptions{})
+			if tc.bad {
+				wantQSOError(t, err, "FREQ", "Invalid FREQ ("+tc.in+"): not an ADIF Number")
+			} else if err != nil {
+				t.Fatalf("FREQ: %v", err)
+			} else if got.Freq != tc.wantFreq {
+				t.Errorf("Freq = %q, want %q", got.Freq, tc.wantFreq)
+			}
+
+			q.Freq, q.FreqRX = "", tc.in
+			got, err = cfg.NormalizeQSO(q, NormalizeOptions{})
+			if tc.bad {
+				wantQSOError(t, err, "FREQ_RX", "Invalid FREQ_RX ("+tc.in+"): not an ADIF Number")
+			} else if err != nil {
+				t.Fatalf("FREQ_RX: %v", err)
+			} else if got.FreqRX != tc.wantRX {
+				t.Errorf("FreqRX = %q, want %q", got.FreqRX, tc.wantRX)
 			}
 		})
 	}

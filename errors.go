@@ -72,7 +72,10 @@ type QSOError struct {
 	// Index is the 0-based position of the QSO in the input. It is -1 when
 	// the Writer is used directly.
 	Index int
-	// Field is the name of the offending field, such as "BAND".
+	// Field is the GAbbI name of the offending field, such as "BAND". Two
+	// values are not GAbbI names: "QSO" for a failure of the record as a
+	// whole, such as a duplicate, and "CQZ/ITUZ" for zones that do not fit
+	// the zone map of the DXCC entity or its primary subdivision.
 	Field string
 	// Err is the underlying error, usually a sentinel.
 	Err error

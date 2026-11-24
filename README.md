@@ -41,19 +41,31 @@ storing it is your application's job:
 
 ## Usage
 
-An illustrative sketch. It is not compiled, and the API is still settling:
+A short sketch with error handling left out. The runnable examples in the
+package documentation (`ExampleSign_all` and others) show it in full. The
+API is still settling:
 
 ```go
 cfg, err := gabbi.ParseConfig(bytes.NewReader(storedConfig))
-cert, key, _, err := gabbi.LoadPKCS12(p12Bytes, "")
-creds := []gabbi.Credential{{Cert: cert, Signer: key}}
+cred, _, err := gabbi.LoadPKCS12(p12Bytes, "")
+creds := []gabbi.Credential{cred}
+
+st := gabbi.Station{
+	Call:       "KF0TST",
+	DXCC:       291,
+	GridSquare: "EM10dh",
+	Fields:     map[string]string{"US_STATE": "TX", "US_COUNTY": "Travis"},
+}
+qsos := []gabbi.QSO{{Call: "W1AW", Band: "20M", Mode: "SSB", Freq: "14.250",
+	Time: time.Date(2026, 11, 1, 15, 30, 0, 0, time.UTC)}}
 
 zw := gzip.NewWriter(out) // a .tq8 is the GAbbI text, gzipped
-report, err := gabbi.Sign(ctx, zw, cfg, creds, station, qsos,
-	gabbi.SignOptions{Action: gabbi.Compliant, Now: time.Now()})
+report, err := gabbi.Sign(ctx, zw, cfg, creds, st, slices.Values(qsos),
+	gabbi.SignOptions{Action: gabbi.Compliant, Dupes: store})
 if err == nil {
 	err = zw.Close()
 }
+// Commit the store's transaction only if report.Commit is true.
 ```
 
 Check every error in real code. Errors wrap sentinels such as

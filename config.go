@@ -733,14 +733,22 @@ func buildPages(x *xmlLocPages, fields map[string]locField) ([]locPage, error) {
 	return out, nil
 }
 
-// Version returns the configuration version, such as 11 and 35.
+// Version returns the configuration version, such as 11 and 35. A nil
+// Config gives 0, 0.
 func (c *Config) Version() (major, minor int) {
+	if c == nil {
+		return 0, 0
+	}
 	return c.major, c.minor
 }
 
 // Sigspec returns the signature specification used for signing: the newest
 // one, chosen the way TrustedQSL chooses it. The returned slices are copies.
+// A nil Config gives the zero Sigspec.
 func (c *Config) Sigspec() Sigspec {
+	if c == nil {
+		return Sigspec{}
+	}
 	ss := c.sigspec
 	ss.Station = slices.Clone(ss.Station)
 	ss.Contact = slices.Clone(ss.Contact)

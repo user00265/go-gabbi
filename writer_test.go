@@ -729,8 +729,8 @@ func TestWriterNilArguments(t *testing.T) {
 	if err := NewWriter(&buf, nil, Ident{}, NormalizeOptions{}).WriteQSO(cred, usStation(), writerQSO("W1AW", 1)); !errors.Is(err, ErrConfig) {
 		t.Errorf("nil config: err = %v, want ErrConfig", err)
 	}
-	if err := NewWriter(nil, cfg, Ident{}, NormalizeOptions{}).WriteQSO(cred, usStation(), writerQSO("W1AW", 1)); err == nil {
-		t.Error("nil io.Writer: no error")
+	if err := NewWriter(nil, cfg, Ident{}, NormalizeOptions{}).WriteQSO(cred, usStation(), writerQSO("W1AW", 1)); !errors.Is(err, ErrConfig) {
+		t.Errorf("nil io.Writer: err = %v, want ErrConfig", err)
 	}
 	if err := NewWriter(&buf, cfg, Ident{}, NormalizeOptions{}).WriteQSO(Credential{}, usStation(), writerQSO("W1AW", 1)); !errors.Is(err, ErrNoCertificate) {
 		t.Errorf("empty credential: err = %v, want ErrNoCertificate", err)
@@ -739,8 +739,11 @@ func TestWriterNilArguments(t *testing.T) {
 		t.Errorf("no signer: err = %v, want ErrNoKey", err)
 	}
 	var nilWriter *Writer
-	if err := nilWriter.WriteQSO(cred, usStation(), writerQSO("W1AW", 1)); err == nil {
-		t.Error("nil *Writer: no error")
+	if err := nilWriter.WriteQSO(cred, usStation(), writerQSO("W1AW", 1)); !errors.Is(err, ErrConfig) {
+		t.Errorf("nil *Writer: err = %v, want ErrConfig", err)
+	}
+	if err := nilWriter.commit(pending{}, false); !errors.Is(err, ErrConfig) {
+		t.Errorf("nil *Writer commit: err = %v, want ErrConfig", err)
 	}
 	if buf.Len() != 0 {
 		t.Errorf("wrote %d bytes", buf.Len())

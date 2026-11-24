@@ -327,3 +327,35 @@ func TestLegacyDupeKeyTruncation(t *testing.T) {
 		t.Errorf("LegacyDupeKey is %d bytes, want 1023", len(got))
 	}
 }
+
+// TestNilConfigNoPanic: every function and method that takes a *Config
+// returns an error or a zero value for a nil one instead of panicking.
+func TestNilConfigNoPanic(t *testing.T) {
+	var cfg *Config
+	cred := newTestCredential(t)
+	st, q := usStation(), workedQSO()
+	if _, err := SignData(cfg, st, q); !errors.Is(err, ErrConfig) {
+		t.Errorf("SignData: err = %v, want ErrConfig", err)
+	}
+	if got := QSODetails(cfg, q); got != "" {
+		t.Errorf("QSODetails = %q, want empty", got)
+	}
+	if got := StationDetails(cfg, st); got != "" {
+		t.Errorf("StationDetails = %q, want empty", got)
+	}
+	if got := DupeKey(cred.Cert, cfg, q); got != "" {
+		t.Errorf("DupeKey = %q, want empty", got)
+	}
+	if _, err := cfg.NormalizeQSO(q, NormalizeOptions{}); !errors.Is(err, ErrConfig) {
+		t.Errorf("NormalizeQSO: err = %v, want ErrConfig", err)
+	}
+	if err := cfg.ValidateStation(st); !errors.Is(err, ErrConfig) {
+		t.Errorf("ValidateStation: err = %v, want ErrConfig", err)
+	}
+	if major, minor := cfg.Version(); major != 0 || minor != 0 {
+		t.Errorf("Version = %d, %d, want 0, 0", major, minor)
+	}
+	if ss := cfg.Sigspec(); ss.Name != "" || ss.Station != nil || ss.Contact != nil {
+		t.Errorf("Sigspec = %+v, want zero", ss)
+	}
+}

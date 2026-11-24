@@ -410,6 +410,9 @@ func TestAtof(t *testing.T) {
 		{".5", 0.5},
 		{"5.", 5},
 		{"14.074.5", 14.074},
+		// C atof gives 1000 (C11 7.22.1.3). This helper keeps only the
+		// decimal prefix; unreachable for FREQ because NormalizeQSO rejects
+		// non-ADIF-Number values (Ruling AR).
 		{"1e3", 1},
 		{"-", 0},
 		{".", 0},
@@ -631,27 +634,29 @@ func TestParseConfigErrors(t *testing.T) {
 		{"gzip bomb", bombStream(t), "16 MiB"},
 		{"plain too large", append([]byte(`<tqslconfig majorversion="11" minorversion="35">`),
 			bytes.Repeat([]byte(" "), 16<<20)...), "16 MiB"},
-		{"missing sigspecs", dropSection(t, x35, "sigspecs"), "it does not have a sigspecs section"},
-		{"no sigspec", []byte(minimalConfig("")), "it does not have a sigspec section"},
+		{"missing sigspecs", dropSection(t, x35, "sigspecs"), "it does not have a sigspecs section"}, // location.cpp:793
+		{"no sigspec", []byte(minimalConfig("")), "it does not have a sigspec section"},              // location.cpp:802
 		{"missing tCONTACT", []byte(minimalConfig(`<sigspec name="LOTW" version="2.0"><tSTATION><CQZ /></tSTATION></sigspec>`)),
-			"missing sigspec.tCONTACT"},
+			"missing sigspec.tCONTACT"}, // location.cpp:830
 		{"empty tCONTACT", []byte(minimalConfig(`<sigspec name="LOTW" version="2.0"><tCONTACT></tCONTACT><tSTATION><CQZ /></tSTATION></sigspec>`)),
-			"empty sigspec.tCONTACT"},
+			"empty sigspec.tCONTACT"}, // location.cpp:837
 		{"missing tSTATION", []byte(minimalConfig(`<sigspec name="LOTW" version="2.0"><tCONTACT><CALL /></tCONTACT></sigspec>`)),
-			"missing sigspec.tSTATION"},
+			"missing sigspec.tSTATION"}, // location.cpp:845
 		{"empty tSTATION", []byte(minimalConfig(`<sigspec name="LOTW" version="2.0"><tCONTACT><CALL /></tCONTACT><tSTATION /></sigspec>`)),
-			"missing tSTATION.specfield"},
+			"missing tSTATION.specfield"}, // location.cpp:854
 		{"page missing Id", []byte(strings.Replace(minimalConfig(minimalSigspec), `<page Id="1" follows="0">`, `<page follows="0">`, 1)),
-			"page missing ID"},
+			"page missing ID"}, // location.cpp:1654
 		{"page Id zero", []byte(strings.Replace(minimalConfig(minimalSigspec), `<page Id="1" follows="0">`, `<page Id="0" follows="0">`, 1)),
-			"page missing ID"},
+			"page missing ID"}, // location.cpp:1654
 		{"field missing Id", []byte(strings.Replace(minimalConfig(minimalSigspec), `<field Id="CALL" `, `<field `, 1)),
-			"field missing ID"},
+			"field missing ID"}, // location.cpp:1672
 		{"undefined pageField", []byte(strings.Replace(minimalConfig(minimalSigspec), `<pageField>CALL</pageField>`, `<pageField>NOPE</pageField>`, 1)),
-			"page references undefined field"},
+			"page references undefined field"}, // location.cpp:2189
 		{"bad dxcc zonemap", []byte(strings.Replace(minimalConfig(minimalSigspec), `zonemap="08:05"`, `zonemap="08-05"`, 1)),
 			"zonemap"},
 	}
+	// TrustedQSL has no message of its own for these sections; the text
+	// follows the sigspecs one (location.cpp:793).
 	for _, section := range []string{"bands", "modes", "adifmap", "propmodes", "satellites", "dxcc", "locfields", "locpages"} {
 		tests = append(tests, struct {
 			name string

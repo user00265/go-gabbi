@@ -40,9 +40,10 @@ const identRecordMax = 511
 // The text is cut so the whole record, "<TQSL_IDENT:N>text\n", fits in
 // 511 bytes, which leaves 494 bytes of text. TrustedQSL cuts the text at
 // 511 bytes (char temp[512], tqslconvert.cpp:901, 914) and then the record
-// at 511 (916-917), so text of 495 to 511 bytes gives it a record whose
-// length prefix overruns the value and which loses its newline. That
-// malformed record is deliberately not reproduced.
+// at 511 (916-917). With 495 bytes of text the record loses only its
+// newline. From 496 bytes it also loses text, so its length prefix
+// overruns the value. Those malformed records are deliberately not
+// reproduced.
 func identRecord(id Ident, cfg *Config) string {
 	prog, ver := id.Program, id.Version
 	if prog == "" {
@@ -131,9 +132,9 @@ func NewWriter(w io.Writer, cfg *Config, id Ident, opt NormalizeOptions) *Writer
 //     v1.5 over SHA-1. A signature longer than 128 bytes gives
 //     [ErrUnsupportedKey].
 //
-// Per-QSO errors are a [*QSOError] with Index -1. A missing certificate,
-// key or configuration gives an error wrapping [ErrNoCertificate],
-// [ErrNoKey] or [ErrConfig].
+// Per-QSO errors are a [*QSOError] with Index -1. A missing certificate or
+// key gives an error wrapping [ErrNoCertificate] or [ErrNoKey]. A nil
+// Writer, configuration or io.Writer gives one wrapping [ErrConfig].
 //
 // When any check fails, nothing is written and the Writer's state is
 // unchanged, so the caller may skip the QSO and go on. When the underlying
@@ -198,13 +199,13 @@ type pending struct {
 // commit the preamble as TrustedQSL would have written it.
 func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 	if wr == nil {
-		return pending{}, errors.New("gabbi: nil Writer")
+		return pending{}, fmt.Errorf("%w: nil Writer", ErrConfig)
 	}
 	if wr.cfg == nil {
 		return pending{}, fmt.Errorf("%w: Writer has no configuration", ErrConfig)
 	}
 	if wr.w == nil {
-		return pending{}, errors.New("gabbi: Writer has no io.Writer")
+		return pending{}, fmt.Errorf("%w: Writer has no io.Writer", ErrConfig)
 	}
 	if err := checkCredential(c.Cert, c.Signer); err != nil {
 		return pending{}, err
@@ -323,7 +324,7 @@ func checkCert(cert *Certificate, st Station, q QSO) error {
 // prepared without error.
 func (wr *Writer) commit(p pending, withContact bool) error {
 	if wr == nil {
-		return errors.New("gabbi: nil Writer")
+		return fmt.Errorf("%w: nil Writer", ErrConfig)
 	}
 	if !p.valid || p.gen != wr.gen {
 		return errors.New("gabbi: stale or empty prepared QSO")

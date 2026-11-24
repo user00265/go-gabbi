@@ -1,4 +1,5 @@
-export GOCACHE := env("GOCACHE", "/tmp/opencode/gocache")
+# GOCACHE is not set here: recipes inherit it from the environment, and
+# when it is unset Go uses its default cache directory.
 export CGO_ENABLED := "0"
 
 # List the recipes.

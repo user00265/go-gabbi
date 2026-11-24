@@ -35,8 +35,11 @@ const (
 // An invalid station gives an error wrapping [ErrInvalidStation]. A missing
 // required contact field gives a [*QSOError] with Index -1 wrapping
 // [ErrInvalidQSO]. A tCONTACT field TrustedQSL does not know gives an error
-// wrapping [ErrConfig].
+// wrapping [ErrConfig], as does a nil cfg.
 func SignData(cfg *Config, st Station, q QSO) (string, error) {
+	if cfg == nil {
+		return "", fmt.Errorf("%w: nil Config", ErrConfig)
+	}
 	ss := cfg.Sigspec()
 	values, err := stationValues(cfg, st)
 	if err != nil {
@@ -141,7 +144,11 @@ func qsoTime(q QSO) string {
 // step: the trimmed tCONTACT values of q, in sigspec order, concatenated
 // (location.cpp:3822). TrustedQSL uses it in the duplicate key. Unknown
 // sigspec fields and empty values are left out; [SignData] reports them.
+// A nil cfg gives "".
 func QSODetails(cfg *Config, q QSO) string {
+	if cfg == nil {
+		return ""
+	}
 	var b strings.Builder
 	for _, f := range cfg.Sigspec().Contact {
 		if v, _ := contactValue(f.Name, q); v != "" {
@@ -156,8 +163,11 @@ func QSODetails(cfg *Config, q QSO) string {
 // sigspec, in sigspec order, joined by ", " (location.cpp:880-883). Values
 // keep their case. The result is cut to 127 bytes, as TrustedQSL copies it
 // into a 128-byte buffer (tqslconvert.cpp:1825-1828); the cut may fall
-// inside a multi-byte character. An invalid station gives "".
+// inside a multi-byte character. An invalid station or a nil cfg gives "".
 func StationDetails(cfg *Config, st Station) string {
+	if cfg == nil {
+		return ""
+	}
 	values, err := stationValues(cfg, st)
 	if err != nil {
 		return ""
@@ -175,8 +185,11 @@ func StationDetails(cfg *Config, st Station) string {
 // callsign followed by [QSODetails], cut to 127 bytes
 // (tqslconvert.cpp:1826-1839). QSODetails is cut to 127 bytes first, as
 // TrustedQSL holds it in its own 128-byte buffer. A nil c counts as an
-// empty callsign.
+// empty callsign. A nil cfg gives "".
 func DupeKey(c *Certificate, cfg *Config, q QSO) string {
+	if cfg == nil {
+		return ""
+	}
 	call := ""
 	if c != nil {
 		call = c.Callsign

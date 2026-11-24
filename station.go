@@ -41,20 +41,30 @@ type stationField struct {
 	name, value string
 }
 
-// typedStationFields are the GAbbI ids that have their own Station field.
-var typedStationFields = []string{"CALL", "DXCC", "GRIDSQUARE", "ITUZ", "CQZ", "IOTA"}
+// typedStationFields returns the GAbbI ids that have their own Station
+// field. It returns an array, a fresh value on each call, so there is no
+// package state to modify.
+func typedStationFields() [6]string {
+	return [...]string{"CALL", "DXCC", "GRIDSQUARE", "ITUZ", "CQZ", "IOTA"}
+}
 
-// primarySubdivisions is TrustedQSL's sasMapping (location.cpp:1768-1777):
-// the fields that can be a location's primary subdivision, in priority order,
-// with the error text for a zone mismatch.
-var primarySubdivisions = []struct{ id, errText string }{
-	{"US_STATE", "Invalid zone selections for state"},
-	{"CA_PROVINCE", "Invalid zone selections for province"},
-	{"RU_OBLAST", "Invalid zone selections for oblast"},
-	{"CN_PROVINCE", "Invalid zone selections for province"},
-	{"AU_STATE", "Invalid zone selections for state"},
-	{"JA_PREFECTURE", "Invalid zone selections for prefecture"},
-	{"FI_KUNTA", "Invalid zone selections for kunta"},
+// primarySubdivision is one entry of primarySubdivisions.
+type primarySubdivision struct{ id, errText string }
+
+// primarySubdivisions returns TrustedQSL's sasMapping
+// (location.cpp:1768-1777): the fields that can be a location's primary
+// subdivision, in priority order, with the error text for a zone mismatch.
+// Like typedStationFields it returns an array value.
+func primarySubdivisions() [7]primarySubdivision {
+	return [...]primarySubdivision{
+		{"US_STATE", "Invalid zone selections for state"},
+		{"CA_PROVINCE", "Invalid zone selections for province"},
+		{"RU_OBLAST", "Invalid zone selections for oblast"},
+		{"CN_PROVINCE", "Invalid zone selections for province"},
+		{"AU_STATE", "Invalid zone selections for state"},
+		{"JA_PREFECTURE", "Invalid zone selections for prefecture"},
+		{"FI_KUNTA", "Invalid zone selections for kunta"},
+	}
 }
 
 // Location field input types (tqsllib.h:978-981) and the UPPER flag
@@ -113,8 +123,11 @@ func stationErr(field, format string, args ...any) error {
 //
 // ValidateStation does not change st. The canonical forms (the configured
 // spelling of list values, uppercased callsign and IOTA) are applied when
-// the station is written.
+// the station is written. A nil Config gives an error wrapping [ErrConfig].
 func (c *Config) ValidateStation(st Station) error {
+	if c == nil {
+		return fmt.Errorf("%w: nil Config", ErrConfig)
+	}
 	_, err := c.stationFields(st)
 	return err
 }
@@ -208,7 +221,7 @@ func (c *Config) stationFields(st Station) ([]stationField, error) {
 		}
 	}
 
-	for _, id := range typedStationFields {
+	for _, id := range typedStationFields() {
 		if _, ok := st.Fields[id]; ok {
 			return nil, stationErr(id, "use the Station field, not Fields")
 		}
@@ -311,7 +324,7 @@ func (c *Config) resolveStationField(f locField, raw string, values map[string]s
 func checkZones(st Station, ent entity, onPages map[string]bool, selected map[string]enumItem) error {
 	ok := inZoneMap(st.CQZ, st.ITUZ, ent.zonemap)
 	text := "Invalid zone selections for DXCC entity"
-	for _, ps := range primarySubdivisions {
+	for _, ps := range primarySubdivisions() {
 		if !onPages[ps.id] {
 			continue
 		}

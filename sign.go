@@ -139,25 +139,36 @@ type Report struct {
 // produce a .tq8 file. Sign builds its own [Writer]; see it for the record
 // layout.
 //
-// For each QSO, in order:
+// Before reading any QSO, every credential in creds is checked as
+// [NewCredential] checks it: a certificate, a signer, an RSA key of at most
+// 1024 bits that matches the certificate. The first failure stops the run
+// with nothing written and Commit false; it wraps [ErrNoCertificate],
+// [ErrNoKey], [ErrUnsupportedKey] or [ErrCertMismatch]. An empty creds gives
+// ErrNoCertificate.
 //
-//  1. The required fields are checked, then the date filter From and To is
-//     applied (tqslconvert.cpp:1343-1388). A QSO outside it is OutOfRange.
-//  2. A credential is chosen as find_matching_cert does
-//     (tqslconvert.cpp:571-599): the first one in creds whose certificate
-//     callsign equals st.Call ignoring case, whose DXCC entity equals
-//     st.DXCC and whose QSO date range holds the QSO date. Expired
-//     certificates (X.509 NotAfter before the UTC date of Now) and
+// Then, for each QSO, in order:
+//
+//  1. The required fields are checked (tqslconvert.cpp:1343-1371).
+//  2. The date filter From and To is applied (tqslconvert.cpp:1374-1388). A
+//     QSO outside it is OutOfRange.
+//  3. The values are checked and normalized with [Config.NormalizeQSO]
+//     (tqslconvert.cpp:1390-1490).
+//  4. A credential is chosen as find_matching_cert does
+//     (tqslconvert.cpp:571-599, called at 1537): the first one in creds
+//     whose certificate callsign equals st.Call ignoring case, whose DXCC
+//     entity equals st.DXCC and whose QSO date range holds the QSO date.
+//     Expired certificates (X.509 NotAfter before the UTC date of Now) and
 //     certificates superseded by another one in creds are left out first,
 //     as tqsl's certificate list leaves them out
 //     (openssl_cert.cpp:853-906, 991-1075). No match gives
 //     [ErrCertMismatch], or [ErrDateRange] when one matched all but the
 //     date.
-//  3. The QSO is normalized and signed. Any tCERT or tSTATION record it
-//     needs is written even if it then fails or turns out to be a
-//     duplicate, as tqsl writes them before it signs.
-//  4. Unless Restart is set or Dupes is nil, the store is checked as
-//     tqslconvert.cpp:1824-1967 does it. A duplicate is not written.
+//  5. The QSO is signed. Any tCERT or tSTATION record it needs is written
+//     even if signing then fails or the QSO turns out to be a duplicate,
+//     as tqsl writes them before it signs.
+//  6. Unless Restart is set or Dupes is nil, the store is checked as
+//     tqslconvert.cpp:1820-1967 does it. A duplicate is not written.
+//  7. The tCONTACT record is written.
 //
 // The Action then decides what happens next:
 //
@@ -192,7 +203,9 @@ type Report struct {
 //	                                      ErrDateRange, ErrInvalidStation, ...
 //	15    bad passphrase                  ErrPassword (from LoadPKCS12, before Sign)
 //	4, 5  failure outside per-QSO checks  ErrConfig (nil or bad configuration or writer),
-//	                                      ErrNoCertificate, ErrNoKey, ErrUnsupportedKey
+//	                                      or a bad credential: ErrNoCertificate, ErrNoKey,
+//	                                      ErrUnsupportedKey, ErrCertMismatch (key not the
+//	                                      certificate's)
 //	6, 7  file I/O                        the caller's writer or store error, wrapped
 //	1     cancelled                       ctx.Err(), such as context.Canceled
 //
@@ -221,6 +234,14 @@ func Sign(ctx context.Context, w io.Writer, cfg *Config, creds []Credential, st 
 	}
 	if w == nil {
 		return rep, fmt.Errorf("%w: Sign has no io.Writer", ErrConfig)
+	}
+	if len(creds) == 0 {
+		return rep, fmt.Errorf("%w: Sign has no credentials", ErrNoCertificate)
+	}
+	for i, c := range creds {
+		if err := checkCredential(c.Cert, c.Signer); err != nil {
+			return rep, fmt.Errorf("gabbi: credential %d: %w", i, err)
+		}
 	}
 	if qsos == nil {
 		return rep, ErrNoQSOs
@@ -447,15 +468,15 @@ type usableCred struct {
 	expired bool
 }
 
-// usableCreds returns creds without those whose certificate is missing or
-// superseded by another credential's certificate, and marks those expired
-// on today, the UTC date: get_certlist's exclusions
-// (openssl_cert.cpp:853-906, 991-1075, 3835-3851). Expired credentials never
-// sign.
+// usableCreds returns creds without those superseded by another
+// credential's certificate, and marks those expired on today, the UTC date:
+// get_certlist's exclusions (openssl_cert.cpp:853-906, 991-1075,
+// 3835-3851). Expired credentials never sign. Every credential must already
+// have passed checkCredential, so its Cert and Cert.X509 are set.
 func usableCreds(creds []Credential, today Date) []usableCred {
 	var out []usableCred
 	for i, c := range creds {
-		if c.Cert == nil || c.Cert.X509 == nil || supersededBy(c.Cert, creds, i) {
+		if supersededBy(c.Cert, creds, i) {
 			continue
 		}
 		out = append(out, usableCred{cred: c, expired: DateOf(c.Cert.X509.NotAfter).Compare(today) < 0})
