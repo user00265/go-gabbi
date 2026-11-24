@@ -9,10 +9,10 @@ by ARRL.
 TrustedQSL configuration data
 ------------------------------------------------------------------------
 
-The files testdata/config-11.34.tq6 and testdata/config-11.35.xml (added in
-a later change) are TrustedQSL/ARRL configuration data. They are included
-as test data only and are not part of the library. They are covered by the
-following notice:
+The files testdata/config-11.34.tq6 and testdata/config-11.35.xml are
+TrustedQSL/ARRL configuration data (see testdata/CONFIGS.md). They are
+included as test data only and are not part of the library. They are
+covered by the following notice:
 
 Copyright (C) 2001-2015 American Radio Relay League, Inc. All rights
 reserved.
