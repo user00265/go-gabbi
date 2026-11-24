@@ -242,7 +242,7 @@ func TestWriterIdent(t *testing.T) {
 		want string
 	}{
 		{Ident{Program: "MyLog", Version: "1.2.3"}, "MyLog 1.2.3 Lib: V1.2.3 Config: V11.35 AllowDupes: false"},
-		{Ident{AllowDupes: true}, "go-gabbi v0 Lib: Vv0 Config: V11.35 AllowDupes: true"},
+		{Ident{AllowDupes: true}, "go-gabbi 0.0.0 Lib: V0.0.0 Config: V11.35 AllowDupes: true"},
 	} {
 		var buf bytes.Buffer
 		wr := NewWriter(&buf, cfg, tt.id, NormalizeOptions{})
@@ -256,13 +256,35 @@ func TestWriterIdent(t *testing.T) {
 
 func TestWriterIdentTruncated(t *testing.T) {
 	cfg := loadTestConfig(t, "config-11.35.xml")
-	// char temp[512] (tqslconvert.cpp:901, 914): at most 511 bytes of text.
-	got := identRecord(Ident{Program: strings.Repeat("P", 600)}, cfg)
-	if !strings.HasPrefix(got, "<TQSL_IDENT:511>"+strings.Repeat("P", 495)) || !strings.HasSuffix(got, "P\n") {
-		t.Errorf("identRecord = %q", got[:min(len(got), 40)])
-	}
-	if want := len("<TQSL_IDENT:511>") + 511 + 1; len(got) != want {
-		t.Errorf("len = %d, want %d", len(got), want)
+	// static char ident[512] holds the whole record "<TQSL_IDENT:%d>%s\n"
+	// (tqslconvert.cpp:902, 916-917), so it may be at most 511 bytes. The
+	// record must also stay well formed: the length prefix matches the
+	// value and the newline is kept. With a 3-digit length that leaves 494
+	// bytes of text.
+	const tail = " 0.0.0 Lib: V0.0.0 Config: V11.35 AllowDupes: false"
+	for _, n := range []int{1, 400, 494 - len(tail), 495 - len(tail), 511 - len(tail), 600} {
+		full := strings.Repeat("P", n) + tail
+		got := identRecord(Ident{Program: strings.Repeat("P", n)}, cfg)
+		if len(got) > 511 {
+			t.Errorf("program %d bytes: record is %d bytes, want at most 511", n, len(got))
+		}
+		head, text, ok := strings.Cut(got, ">")
+		if !ok || !strings.HasPrefix(head, "<TQSL_IDENT:") || !strings.HasSuffix(text, "\n") {
+			t.Fatalf("program %d bytes: malformed record %q", n, got[:min(len(got), 40)])
+		}
+		text = strings.TrimSuffix(text, "\n")
+		if l, err := strconv.Atoi(strings.TrimPrefix(head, "<TQSL_IDENT:")); err != nil || l != len(text) {
+			t.Errorf("program %d bytes: length prefix %q, value is %d bytes", n, head, len(text))
+		}
+		if !strings.HasPrefix(full, text) {
+			t.Errorf("program %d bytes: text is not a prefix of the full ident", n)
+		}
+		if len(full) <= 494 && text != full {
+			t.Errorf("program %d bytes: %d-byte text was cut", n, len(full))
+		}
+		if len(full) > 494 && len(text) != 494 {
+			t.Errorf("program %d bytes: text cut to %d bytes, want 494", n, len(text))
+		}
 	}
 }
 
@@ -547,8 +569,8 @@ func TestWriterInvalidInput(t *testing.T) {
 		st.Fields = map[string]string{"US_STATE": "XX"}
 		err := newTestWriter(t, &buf).WriteQSO(cred, st, writerQSO("W1AW", 1))
 		var qe *QSOError
-		if !errors.Is(err, ErrInvalidStation) || !errors.As(err, &qe) || qe.Index != -1 {
-			t.Fatalf("err = %v, want *QSOError wrapping ErrInvalidStation", err)
+		if !errors.Is(err, ErrInvalidStation) || !errors.As(err, &qe) || qe.Index != -1 || qe.Field != "US_STATE" {
+			t.Fatalf("err = %v, want *QSOError US_STATE wrapping ErrInvalidStation", err)
 		}
 		if buf.Len() != 0 {
 			t.Errorf("wrote %d bytes", buf.Len())
@@ -732,7 +754,7 @@ func TestWriterPendingFields(t *testing.T) {
 		p.StationDetails != StationDetails(cfg, usStation()) {
 		t.Errorf("pending = %+v", p)
 	}
-	if err := wr.commit(p); err != nil {
+	if err := wr.commit(p, true); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	// A pending from before the last commit is stale.
@@ -744,14 +766,178 @@ func TestWriterPendingFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := wr.commit(p2); err != nil {
+	if err := wr.commit(p2, true); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 	n := buf.Len()
-	if err := wr.commit(p3); err == nil {
+	if err := wr.commit(p3, true); err == nil {
 		t.Error("commit of a stale pending succeeded")
 	}
 	if buf.Len() != n {
 		t.Error("stale commit wrote bytes")
+	}
+}
+
+func TestWriterDuplicateKeepsPreamble(t *testing.T) {
+	// unverified: fixture phase confirms
+	// tqsl_getConverterGABBI returns tCERT (tqslconvert.cpp:1562-1580) and
+	// tSTATION (1813-1816) as separate records, and apps/tqsl.cpp:2363-2373
+	// writes each as soon as it is returned. The duplicate check comes after
+	// signing (tqslconvert.cpp:1842-1849), so a duplicate under -a compliant
+	// leaves its tCERT and tSTATION in the file and the UIDs advanced. This
+	// is how Sign (Task 7) drives prepare and commit.
+	var buf bytes.Buffer
+	wr := newTestWriter(t, &buf)
+	credA := newTestCredential(t)
+	credB := newTestCredentialWith(t, defaultTestCertFields())
+
+	p1, err := wr.prepare(credA, usStation(), writerQSO("W1AW", 1))
+	if err != nil {
+		t.Fatalf("prepare QSO1: %v", err)
+	}
+	if err := wr.commit(p1, false); err != nil { // rejected as a duplicate
+		t.Fatalf("commit QSO1: %v", err)
+	}
+	p2, err := wr.prepare(credB, usStation(), writerQSO("W1AW", 2))
+	if err != nil {
+		t.Fatalf("prepare QSO2: %v", err)
+	}
+	if err := wr.commit(p2, true); err != nil {
+		t.Fatalf("commit QSO2: %v", err)
+	}
+
+	rs := parseGAbbI(t, buf.Bytes())
+	wantTypes(t, rs, "TQSL_IDENT", "tCERT", "tSTATION", "tCERT", "tSTATION", "tCONTACT")
+	for _, c := range []struct {
+		rec         int
+		field       string
+		want        int
+		description string
+	}{
+		{1, "CERT_UID", 1, "tCERT A"},
+		{2, "STATION_UID", 1, "tSTATION for A"},
+		{2, "CERT_UID", 1, "tSTATION for A"},
+		{3, "CERT_UID", 2, "tCERT B"},
+		{4, "STATION_UID", 2, "tSTATION for B"},
+		{4, "CERT_UID", 2, "tSTATION for B"},
+		{5, "STATION_UID", 2, "tCONTACT"},
+	} {
+		if got := rs[c.rec].uid(t, c.field); got != c.want {
+			t.Errorf("%s %s = %d, want %d", c.description, c.field, got, c.want)
+		}
+	}
+	certA, _ := rs[1].get("CERTIFICATE")
+	if der, _ := base64.StdEncoding.DecodeString(strings.ReplaceAll(certA, "\n", "")); !bytes.Equal(der, credA.Cert.X509.Raw) {
+		t.Error("first tCERT is not certificate A")
+	}
+	// Each record is still followed by a blank line (apps/tqsl.cpp:2365-2369).
+	if n := strings.Count(buf.String(), "<eor>\n\n"); n != 5 {
+		t.Errorf("%d records end in <eor> and a blank line, want 5", n)
+	}
+}
+
+func TestWriterSignFailureKeepsPreamble(t *testing.T) {
+	cred := newTestCredential(t)
+	bad := Credential{Cert: cred.Cert, Signer: fakeSigner{
+		pub:  cred.Signer.Public(),
+		sign: func([]byte) ([]byte, error) { return nil, errTestSigner },
+	}}
+
+	// prepare gives the error and a pending holding the ident, tCERT and
+	// tSTATION, which tqsl has already written by the time it signs
+	// (tqslconvert.cpp:1576, 1813-1816, 1820; apps/tqsl.cpp:2363-2373).
+	var buf bytes.Buffer
+	wr := newTestWriter(t, &buf)
+	p, err := wr.prepare(bad, usStation(), writerQSO("W1AW", 1))
+	if !errors.Is(err, errTestSigner) {
+		t.Fatalf("prepare err = %v, want the signer error", err)
+	}
+	if p.contact != nil {
+		t.Error("pending has a tCONTACT after a signing failure")
+	}
+	if err := wr.commit(p, true); err == nil {
+		t.Error("commit with contact succeeded without a tCONTACT")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("failed commit wrote %d bytes", buf.Len())
+	}
+	if err := wr.commit(p, false); err != nil {
+		t.Fatalf("commit preamble: %v", err)
+	}
+	wantTypes(t, parseGAbbI(t, buf.Bytes()), "TQSL_IDENT", "tCERT", "tSTATION")
+
+	// The next QSO reuses the cert and station already written.
+	mustWrite(t, wr, cred, usStation(), writerQSO("W1AW", 2))
+	rs := parseGAbbI(t, buf.Bytes())
+	wantTypes(t, rs, "TQSL_IDENT", "tCERT", "tSTATION", "tCONTACT")
+	if got := rs[3].uid(t, "STATION_UID"); got != 1 {
+		t.Errorf("tCONTACT STATION_UID = %d, want 1", got)
+	}
+
+	// WriteQSO in the same situation writes nothing.
+	var buf2 bytes.Buffer
+	if err := newTestWriter(t, &buf2).WriteQSO(bad, usStation(), writerQSO("W1AW", 1)); !errors.Is(err, errTestSigner) {
+		t.Fatalf("WriteQSO err = %v, want the signer error", err)
+	}
+	if buf2.Len() != 0 {
+		t.Errorf("WriteQSO wrote %d bytes after a signing failure", buf2.Len())
+	}
+}
+
+func TestWriterPreambleOnlyEmpty(t *testing.T) {
+	// With the cert and station already written, a rejected QSO has an
+	// empty preamble, and commit(p, false) makes no Write at all.
+	fw := &failWriter{}
+	wr := newTestWriter(t, fw)
+	cred := newTestCredential(t)
+	mustWrite(t, wr, cred, usStation(), writerQSO("W1AW", 1))
+	p, err := wr.prepare(cred, usStation(), writerQSO("W1AW", 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.preamble) != 0 {
+		t.Fatalf("preamble = %q, want empty", p.preamble)
+	}
+	fw.n = 1 // a Write would fail
+	if err := wr.commit(p, false); err != nil {
+		t.Errorf("commit of an empty preamble: %v", err)
+	}
+}
+
+func TestWriterNoPreambleOnEarlyError(t *testing.T) {
+	// Normalization, station and certificate failures give a zero pending,
+	// which commit refuses.
+	var buf bytes.Buffer
+	wr := newTestWriter(t, &buf)
+	st := usStation()
+	st.Call = "KF0XXX"
+	p, err := wr.prepare(newTestCredential(t), st, writerQSO("W1AW", 1))
+	if !errors.Is(err, ErrCertMismatch) {
+		t.Fatalf("err = %v, want ErrCertMismatch", err)
+	}
+	if p.valid || p.preamble != nil {
+		t.Errorf("pending = %+v, want zero", p)
+	}
+	if err := wr.commit(p, false); err == nil || buf.Len() != 0 {
+		t.Errorf("commit of a zero pending: err %v, %d bytes", err, buf.Len())
+	}
+}
+
+func TestStationErrorField(t *testing.T) {
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	st := usStation()
+	st.Fields = map[string]string{"US_STATE": "XX"}
+	err := cfg.ValidateStation(st)
+	// ValidateStation's contract: wraps ErrInvalidStation and names the
+	// field in the message.
+	if !errors.Is(err, ErrInvalidStation) || !strings.Contains(err.Error(), "US_STATE") {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "gabbi: invalid station: US_STATE: ") {
+		t.Errorf("message = %q", err.Error())
+	}
+	var se *stationError
+	if !errors.As(err, &se) || se.field != "US_STATE" {
+		t.Errorf("err = %#v, want *stationError for US_STATE", err)
 	}
 }

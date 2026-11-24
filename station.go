@@ -67,8 +67,21 @@ const (
 	flagUpper = 1
 )
 
+// stationError is an invalid station field. It wraps [ErrInvalidStation]
+// and carries the GAbbI field name, so the Writer can report it in
+// [QSOError.Field].
+type stationError struct {
+	field, msg string
+}
+
+func (e *stationError) Error() string {
+	return ErrInvalidStation.Error() + ": " + e.field + ": " + e.msg
+}
+
+func (e *stationError) Unwrap() error { return ErrInvalidStation }
+
 func stationErr(field, format string, args ...any) error {
-	return fmt.Errorf("%w: %s: "+format, append([]any{ErrInvalidStation, field}, args...)...)
+	return &stationError{field: field, msg: fmt.Sprintf(format, args...)}
 }
 
 // ValidateStation checks st against the configuration the way TrustedQSL's

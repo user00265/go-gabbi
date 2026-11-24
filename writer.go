@@ -18,16 +18,17 @@ type Ident struct {
 	// Program is the program name, such as "MyLogger". Empty means
 	// "go-gabbi".
 	Program string
-	// Version is the program version, such as "1.4.2". Empty means "v0".
+	// Version is the program version, such as "1.4.2". Empty means
+	// "0.0.0".
 	Version string
 	// AllowDupes says whether QSOs already signed are signed again. It is
 	// only reported in the ident; the Writer keeps no duplicate store.
 	AllowDupes bool
 }
 
-// identMax is char temp[512] in get_ident_rec (tqslconvert.cpp:901, 914):
-// the ident text holds at most 511 bytes.
-const identMax = 511
+// identRecordMax is static char ident[512] in get_ident_rec
+// (tqslconvert.cpp:902, 916-917): the whole record holds at most 511 bytes.
+const identRecordMax = 511
 
 // identRecord returns the TQSL_IDENT record for id and the configuration
 // version: get_ident_rec (tqslconvert.cpp:896-920) up to AllowDupes. The
@@ -35,17 +36,27 @@ const identMax = 511
 // is left out, as there is no source log. Whether LoTW accepts an ident that
 // does not start with "TQSL V" is an open question; this is the one place
 // to change the text.
+//
+// The text is cut so the whole record, "<TQSL_IDENT:N>text\n", fits in
+// 511 bytes, which leaves 494 bytes of text. TrustedQSL cuts the text at
+// 511 bytes (char temp[512], tqslconvert.cpp:901, 914) and then the record
+// at 511 (916-917), so text of 495 to 511 bytes gives it a record whose
+// length prefix overruns the value and which loses its newline. That
+// malformed record is deliberately not reproduced.
 func identRecord(id Ident, cfg *Config) string {
 	prog, ver := id.Program, id.Version
 	if prog == "" {
 		prog = "go-gabbi"
 	}
 	if ver == "" {
-		ver = "v0"
+		ver = "0.0.0"
 	}
 	major, minor := cfg.Version()
 	text := fmt.Sprintf("%s %s Lib: V%s Config: V%d.%d AllowDupes: %t", prog, ver, ver, major, minor, id.AllowDupes)
-	text = truncate(text, identMax)
+	// Overhead is "<TQSL_IDENT:" + digits + ">" + "\n".
+	for len("<TQSL_IDENT:")+len(strconv.Itoa(len(text)))+len(">")+len(text)+len("\n") > identRecordMax {
+		text = text[:len(text)-1]
+	}
 	return "<TQSL_IDENT:" + strconv.Itoa(len(text)) + ">" + text + "\n"
 }
 
@@ -108,7 +119,7 @@ func NewWriter(w io.Writer, cfg *Config, id Ident, opt NormalizeOptions) *Writer
 //
 //  1. q is normalized with [Config.NormalizeQSO].
 //  2. st is validated with [Config.ValidateStation]; the error wraps
-//     [ErrInvalidStation].
+//     [ErrInvalidStation] and its Field names the station field.
 //  3. st.Call must equal the certificate callsign ignoring case, and st.DXCC
 //     its DXCC entity (tqslconvert.cpp:571-599, 1590-1621); otherwise
 //     [ErrCertMismatch].
@@ -128,21 +139,33 @@ func NewWriter(w io.Writer, cfg *Config, id Ident, opt NormalizeOptions) *Writer
 // unchanged, so the caller may skip the QSO and go on. When the underlying
 // Write fails, the state is also unchanged, but the destination may hold
 // part of the records and should be discarded.
+//
+// This is stricter than tqsl. TrustedQSL writes the tCERT and tSTATION
+// records as soon as its converter returns them (apps/tqsl.cpp:2338-2373),
+// before it signs the QSO or checks it for duplicates, so a QSO rejected at
+// that point leaves its tCERT and tSTATION in the file. The Sign function
+// reproduces that; WriteQSO does not.
 func (wr *Writer) WriteQSO(c Credential, st Station, q QSO) error {
 	p, err := wr.prepare(c, st, q)
 	if err != nil {
 		return err
 	}
-	return wr.commit(p)
+	return wr.commit(p, true)
 }
 
-// pending is one signed QSO, ready to write. prepare builds it and commit
-// writes it. The exported-style fields are what the signing driver needs
-// for its duplicate store between the two.
+// pending is one prepared QSO. prepare builds it and commit writes it. The
+// exported-style fields are what the signing driver needs for its
+// duplicate store between the two.
+//
+// The records are held in two parts, as TrustedQSL returns them one at a
+// time: the preamble (the ident if it is the first record, then any tCERT
+// and tSTATION) and the tCONTACT. commit always writes the preamble and
+// applies its UID changes; the tCONTACT is optional.
 type pending struct {
 	// QSO is the normalized QSO.
 	QSO QSO
-	// SignData is the signed text, as in the SIGNDATA field.
+	// SignData is the signed text, as in the SIGNDATA field. It is empty
+	// when prepare failed after the preamble.
 	SignData string
 	// Cert is the certificate that signed; with QSO and SignData it gives
 	// DupeKey and LegacyDupeKey.
@@ -150,18 +173,29 @@ type pending struct {
 	// StationDetails is StationDetails of the station.
 	StationDetails string
 
-	rec        []byte         // every record to write, ident included
-	gen        uint64         // Writer.gen when prepared
-	certKey    string         // certificate DER
-	certUID    int            // CERT_UID in use after commit
-	newCert    bool           // a tCERT is in rec
-	stationUID int            // STATION_UID in use after commit
-	fields     []stationField // the station's tSTATION fields
-	newStation bool           // a tSTATION is in rec
+	valid    bool   // built by prepare past the certificate checks
+	gen      uint64 // Writer.gen when prepared
+	preamble []byte // ident, tCERT and tSTATION records, each with "\n"
+	contact  []byte // tCONTACT record with "\n"; nil if signing failed
+
+	// State changes of the preamble.
+	identWritten bool           // the preamble starts with the ident
+	certKey      string         // certificate DER
+	certUID      int            // CERT_UID in use after commit
+	newCert      bool           // a tCERT is in the preamble
+	stationUID   int            // STATION_UID in use after commit
+	fields       []stationField // the station's tSTATION fields
+	newStation   bool           // a tSTATION is in the preamble
 }
 
 // prepare runs every check of WriteQSO, signs q and builds the records,
 // without writing anything or changing the Writer.
+//
+// When normalization or the station or certificate checks fail, it returns
+// a zero pending and the error. When those pass but building the sign data
+// or signing fails, it returns the error together with a pending whose
+// preamble is valid and whose contact is nil, so the caller can still
+// commit the preamble as TrustedQSL would have written it.
 func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 	if wr == nil {
 		return pending{}, errors.New("gabbi: nil Writer")
@@ -183,32 +217,22 @@ func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 	}
 	fields, err := wr.cfg.stationFields(st)
 	if err != nil {
-		return pending{}, &QSOError{Index: -1, Field: "STATION", Err: err}
+		qe := &QSOError{Index: -1, Field: "STATION", Err: err}
+		var se *stationError
+		if errors.As(err, &se) {
+			qe.Field = se.field
+		}
+		return pending{}, qe
 	}
 	if err := checkCert(cert, st, n); err != nil {
 		return pending{}, err
 	}
-	sd, err := SignData(wr.cfg, st, n)
-	if err != nil {
-		return pending{}, err
-	}
-
-	sigName := signatureField(wr.cfg.Sigspec())
-	digest := sha1.Sum([]byte(sd))
-	sig, err := c.Signer.Sign(rand.Reader, digest[:], crypto.SHA1)
-	if err != nil {
-		return pending{}, &QSOError{Index: -1, Field: sigName, Err: fmt.Errorf("gabbi: sign: %w", err)}
-	}
-	if len(sig) > maxSigLen {
-		return pending{}, fmt.Errorf("%w: %d-byte signature, TrustedQSL holds at most %d",
-			ErrUnsupportedKey, len(sig), maxSigLen)
-	}
 
 	p := pending{
 		QSO:            n,
-		SignData:       sd,
 		Cert:           cert,
 		StationDetails: StationDetails(wr.cfg, st),
+		valid:          true,
 		gen:            wr.gen,
 		certKey:        string(cert.X509.Raw),
 		certUID:        wr.certUID,
@@ -217,6 +241,8 @@ func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 	}
 	var b strings.Builder
 	if !wr.started {
+		// tqslconvert.cpp:1228-1230.
+		p.identWritten = true
 		b.WriteString(identRecord(wr.id, wr.cfg) + "\n")
 	}
 	needStation := false
@@ -237,8 +263,26 @@ func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 		p.stationUID++
 		b.WriteString(recStation(fields, p.stationUID, p.certUID) + "\n")
 	}
-	b.WriteString(recContact(n, p.stationUID, sigName, sig, sd) + "\n")
-	p.rec = []byte(b.String())
+	p.preamble = []byte(b.String())
+
+	// Signing happens in tqsl_getGABBItCONTACTData (tqslconvert.cpp:1820),
+	// after the preamble records have been returned.
+	sd, err := SignData(wr.cfg, st, n)
+	if err != nil {
+		return p, err
+	}
+	sigName := signatureField(wr.cfg.Sigspec())
+	digest := sha1.Sum([]byte(sd))
+	sig, err := c.Signer.Sign(rand.Reader, digest[:], crypto.SHA1)
+	if err != nil {
+		return p, &QSOError{Index: -1, Field: sigName, Err: fmt.Errorf("gabbi: sign: %w", err)}
+	}
+	if len(sig) > maxSigLen {
+		return p, fmt.Errorf("%w: %d-byte signature, TrustedQSL holds at most %d",
+			ErrUnsupportedKey, len(sig), maxSigLen)
+	}
+	p.SignData = sd
+	p.contact = []byte(recContact(n, p.stationUID, sigName, sig, sd) + "\n")
 	return p, nil
 }
 
@@ -271,24 +315,38 @@ func checkCert(cert *Certificate, st Station, q QSO) error {
 	return nil
 }
 
-// commit writes the records of p in one Write and, when that succeeds,
-// records the UIDs and station it used. p must come from prepare with no
-// commit in between.
-func (wr *Writer) commit(p pending) error {
+// commit writes the preamble of p and, when withContact is set, its
+// tCONTACT, in one Write, then applies the preamble's state changes. With
+// withContact false only the preamble is written, and no Write is made when
+// it is empty. State changes only after a successful write. p must come
+// from prepare with no commit in between, and withContact needs a p
+// prepared without error.
+func (wr *Writer) commit(p pending, withContact bool) error {
 	if wr == nil {
 		return errors.New("gabbi: nil Writer")
 	}
-	if p.rec == nil || p.gen != wr.gen {
+	if !p.valid || p.gen != wr.gen {
 		return errors.New("gabbi: stale or empty prepared QSO")
 	}
-	n, err := wr.w.Write(p.rec)
-	if err == nil && n < len(p.rec) {
-		err = io.ErrShortWrite
+	if withContact && p.contact == nil {
+		return errors.New("gabbi: prepared QSO has no tCONTACT")
 	}
-	if err != nil {
-		return fmt.Errorf("gabbi: write: %w", err)
+	rec := p.preamble
+	if withContact {
+		rec = append(slices.Clip(p.preamble), p.contact...)
 	}
-	wr.started = true
+	if len(rec) > 0 {
+		n, err := wr.w.Write(rec)
+		if err == nil && n < len(rec) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			return fmt.Errorf("gabbi: write: %w", err)
+		}
+	}
+	if p.identWritten {
+		wr.started = true
+	}
 	if p.newCert {
 		wr.certUIDs[p.certKey] = p.certUID
 	}
