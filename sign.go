@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -81,7 +80,8 @@ const (
 	// for it beyond any tCERT and tSTATION it needed.
 	Duplicate
 	// OutOfRange means the QSO date was outside SignOptions.From and To.
-	// Nothing was written for it.
+	// Nothing was written for it. Its error wraps ErrDateRange, as does a
+	// Failed QSO whose date no certificate covers.
 	OutOfRange
 	// Failed means the QSO could not be signed: it was invalid, no
 	// certificate matched, or signing failed.
@@ -111,7 +111,8 @@ type Result struct {
 	Outcome Outcome
 	// Err is nil for Signed. Otherwise it is a [*QSOError] wrapping
 	// [ErrDuplicate], [ErrDateRange] for OutOfRange, or the reason the QSO
-	// failed.
+	// failed. An OutOfRange QSO and a Failed one whose date no certificate
+	// covers both wrap ErrDateRange; tell them apart by Outcome.
 	Err error
 	// OldDetails and NewDetails are set for a Duplicate found under the
 	// current key: the station details stored with it and the current
@@ -185,25 +186,41 @@ type Report struct {
 //	8     nothing signed                  ErrNoQSOs: empty input, or every QSO was a
 //	                                      duplicate, out of range or bad
 //	9     some suppressed (compliant)     nil, with nonzero Report counts
-//	14    abort on a duplicate            *QSOError wrapping ErrDuplicate
+//	8/14  abort on a duplicate            *QSOError wrapping ErrDuplicate (which of 8 and
+//	                                      14 tqsl uses is settled by fixture)
+//	8     abort stopped on a bad QSO      *QSOError wrapping ErrInvalidQSO, ErrCertMismatch,
+//	                                      ErrDateRange, ErrInvalidStation, ...
 //	15    bad passphrase                  ErrPassword (from LoadPKCS12, before Sign)
-//	4, 5  TQSL or library error           *QSOError wrapping ErrCertMismatch, ErrDateRange,
-//	                                      ErrInvalidQSO, ErrInvalidStation, ErrConfig, ...
+//	4, 5  failure outside per-QSO checks  ErrConfig (nil or bad configuration or writer),
+//	                                      ErrNoCertificate, ErrNoKey, ErrUnsupportedKey
 //	6, 7  file I/O                        the caller's writer or store error, wrapped
 //	1     cancelled                       ctx.Err(), such as context.Canceled
 //
 // [ErrRestart] has no tqsl status of its own: tqsl restarts by itself.
 // Per-QSO problems that did not stop the run are in [Report.Results].
+// Under abort, tqsl ends a run stopped by a bad QSO with numrecs 0 and
+// exit 8 (apps/tqsl.cpp:2486-2490, 2539-2541, 2642-2643, 2748).
 //
-// The Report is returned with every error. Commit is true only when the run
-// ended normally, with nil or [ErrNoQSOs], and read at least one QSO.
+// A DupeStore error always stops the run, with Commit false, under every
+// Action. This deliberately differs from tqsl, which under -a compliant
+// and -a all counts a database error as a skipped QSO and goes on
+// (apps/tqsl.cpp:2491-2524) and ignores failed deletes
+// (tqslconvert.cpp:1853, 1941). A caller-supplied store that fails part
+// way through leaves the duplicate state unknown, so go-gabbi does not
+// carry on.
+//
+// The Report is returned with every error. Commit is true only when Sign
+// returns nil: the run wrote at least one tCONTACT and did not abort, ask
+// for a restart or stop on an error. tqsl likewise commits its duplicate
+// database only when it wrote a record (apps/tqsl.cpp:2730-2779) and rolls
+// it back otherwise (tqslconvert.cpp:542-545).
 func Sign(ctx context.Context, w io.Writer, cfg *Config, creds []Credential, st Station, qsos iter.Seq[QSO], opt SignOptions) (Report, error) {
 	var rep Report
 	if cfg == nil {
 		return rep, fmt.Errorf("%w: Sign has no configuration", ErrConfig)
 	}
 	if w == nil {
-		return rep, errors.New("gabbi: Sign has no io.Writer")
+		return rep, fmt.Errorf("%w: Sign has no io.Writer", ErrConfig)
 	}
 	if qsos == nil {
 		return rep, ErrNoQSOs
@@ -256,9 +273,10 @@ func Sign(ctx context.Context, w io.Writer, cfg *Config, creds []Credential, st 
 	if opt.Action == All && !opt.Restart && rep.Duplicates > 0 {
 		return rep, ErrRestart
 	}
-	// apps/tqsl.cpp:2634-2643: roll back when nothing was processed; no
-	// tCONTACT written is exit 8.
-	rep.Commit = len(rep.Results) > 0
+	// tqsl commits the store only when it wrote at least one record
+	// (apps/tqsl.cpp:2730-2779); otherwise tqsl_endConverter rolls the
+	// transaction back (tqslconvert.cpp:542-545). No tCONTACT is exit 8.
+	rep.Commit = contacts > 0
 	if contacts == 0 {
 		return rep, ErrNoQSOs
 	}
@@ -295,11 +313,18 @@ func (s *signer) one(i int, q QSO) (r Result, fatal error) {
 			Detail: fmt.Sprintf("QSO date %s is outside the selected dates", d)}
 		return r, nil
 	}
+	// The value checks (tqslconvert.cpp:1390-1490) come before the
+	// certificate lookup (1537). prepare normalizes again, which changes
+	// nothing as NormalizeQSO is idempotent.
+	n, err := s.cfg.NormalizeQSO(q, s.opt.Normalize)
+	if err != nil {
+		return fail(err)
+	}
 	cred, err := s.pick(d)
 	if err != nil {
 		return fail(err)
 	}
-	p, err := s.wr.prepare(cred, s.st, q)
+	p, err := s.wr.prepare(cred, s.st, n)
 	if err != nil {
 		if p.valid {
 			// Signing failed after the preamble, which tqsl has written.

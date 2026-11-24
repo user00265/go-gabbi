@@ -423,10 +423,11 @@ func TestSignOutOfRangeEmitsNothing(t *testing.T) {
 	if len(store.calls) != 0 {
 		t.Errorf("store calls = %v, want none", store.calls)
 	}
-	// tqsl counts out-of-range QSOs in processed (apps/tqsl.cpp:2434) and
-	// rolls back only when processed is 0 (2634).
-	if !rep.Commit {
-		t.Error("Commit = false, want true")
+	// No record written: tqsl commits only when numrecs > 0
+	// (apps/tqsl.cpp:2730-2779) and tqsl_endConverter rolls back
+	// (tqslconvert.cpp:542-545).
+	if rep.Commit {
+		t.Error("Commit = true, want false")
 	}
 
 	// A missing CALL is checked before the filter (tqslconvert.cpp:1343),
@@ -686,9 +687,10 @@ func TestSignCompliant(t *testing.T) {
 }
 
 func TestSignCompliantNothingSigned(t *testing.T) {
-	// Everything a duplicate: tqsl exits 8 (apps/tqsl.cpp:2642-2643).
-	// Commit follows the controller ruling: processed > 0, as tqsl rolls
-	// back in SignLogFile only when processed == 0 (2634-2638).
+	// Everything a duplicate: tqsl exits 8 (apps/tqsl.cpp:2642-2643). With
+	// no record written it never commits (2730-2779) and
+	// tqsl_endConverter rolls back (tqslconvert.cpp:542-545), so even the
+	// legacy-key migration below is undone.
 	cred := newTestCredential(t)
 	store := newMapStore()
 	store.m[testLegacyKey(cred)] = "x"
@@ -697,10 +699,11 @@ func TestSignCompliantNothingSigned(t *testing.T) {
 	if !errors.Is(err, ErrNoQSOs) {
 		t.Fatalf("err = %v, want ErrNoQSOs", err)
 	}
-	if rep.Duplicates != 1 || !rep.Commit {
-		t.Errorf("report = %+v, want 1 duplicate and Commit", rep)
+	if rep.Duplicates != 1 || rep.Commit {
+		t.Errorf("report = %+v, want 1 duplicate and no Commit", rep)
 	}
-	// The legacy entry was migrated (tqslconvert.cpp:1853-1856).
+	// The legacy entry was migrated in the store (tqslconvert.cpp:1853-1856),
+	// for the caller to roll back.
 	if !mapsEqual(store.m, map[string]string{testKey1: testDetails}) {
 		t.Errorf("store = %v", store.m)
 	}
@@ -881,9 +884,10 @@ func TestSignEmpty(t *testing.T) {
 var errTestStore = errors.New("test store failure")
 
 func TestSignStoreError(t *testing.T) {
-	// A database error stops the run and rolls back
-	// (tqslconvert.cpp:1857-1866, 1869-1879, 1942-1952, 1957-1965;
-	// apps/tqsl.cpp:2508-2510).
+	// A store error stops the run and rolls back under every Action,
+	// Delete included. This deliberately differs from tqsl, which under
+	// compliant and all skips the QSO and goes on (apps/tqsl.cpp:2491-2524)
+	// and ignores failed deletes (tqslconvert.cpp:1853, 1941).
 	cred := newTestCredential(t)
 	for _, tt := range []struct {
 		name string
@@ -957,8 +961,8 @@ func TestSignNilArguments(t *testing.T) {
 	if _, err := Sign(context.Background(), &bytes.Buffer{}, nil, nil, usStation(), qs, SignOptions{}); !errors.Is(err, ErrConfig) {
 		t.Errorf("nil cfg: err = %v, want ErrConfig", err)
 	}
-	if _, err := Sign(context.Background(), nil, cfg, nil, usStation(), qs, SignOptions{}); err == nil {
-		t.Error("nil writer: no error")
+	if _, err := Sign(context.Background(), nil, cfg, nil, usStation(), qs, SignOptions{}); !errors.Is(err, ErrConfig) {
+		t.Errorf("nil writer: err = %v, want ErrConfig", err)
 	}
 	// A nil Credential is never chosen.
 	_, rep, _ := runSign(t, []Credential{{}}, usStation(), []QSO{writerQSO("W1AW", 1)}, SignOptions{})
@@ -982,5 +986,24 @@ func TestOnelineName(t *testing.T) {
 	}
 	if got := onelineName([]byte{0xff}); got != "" {
 		t.Errorf("onelineName(garbage) = %q, want empty", got)
+	}
+}
+
+func TestSignValueCheckBeforeCertLookup(t *testing.T) {
+	// The band check (tqslconvert.cpp:1438) comes before
+	// find_matching_cert (1537), so an invalid band on a QSO no cert
+	// covers is reported as the band, not as a date mismatch.
+	q := dayQSO(2019, 1, 1) // before the default cert's 2020-05-14
+	q.Band = "99M"
+	for _, a := range []Action{Compliant, Abort} {
+		_, rep, err := runSign(t, []Credential{newTestCredential(t)}, usStation(), []QSO{q}, SignOptions{Action: a})
+		wantOutcomes(t, rep, Failed)
+		var qe *QSOError
+		if !errors.As(rep.Results[0].Err, &qe) || !errors.Is(qe, ErrInvalidQSO) || errors.Is(qe, ErrDateRange) || qe.Field != "BAND" {
+			t.Errorf("action %d: Result.Err = %v, want an ErrInvalidQSO QSOError on BAND", a, rep.Results[0].Err)
+		}
+		if a == Abort && !errors.Is(err, ErrInvalidQSO) {
+			t.Errorf("Abort: err = %v, want ErrInvalidQSO", err)
+		}
 	}
 }
