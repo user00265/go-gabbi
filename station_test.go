@@ -51,7 +51,10 @@ func TestStationFieldsOrder(t *testing.T) {
 			if err := cfg.ValidateStation(st); err != nil {
 				t.Fatalf("ValidateStation: %v", err)
 			}
-			fs := cfg.stationFields(st)
+			fs, err := cfg.stationFields(st)
+			if err != nil {
+				t.Fatalf("stationFields: %v", err)
+			}
 			// Page 1 is CALL DXCC GRIDSQUARE ITUZ CQZ IOTA ZERR
 			// (config.xml:7514-7522); page 2 (dependency 291) is US_STATE
 			// US_COUNTY US_PARK ZERR (config.xml:7523-7528). IOTA and
@@ -82,7 +85,11 @@ func TestStationFieldsCanonical(t *testing.T) {
 	if err := cfg.ValidateStation(st); err != nil {
 		t.Fatalf("ValidateStation: %v", err)
 	}
-	got := fieldValues(cfg.stationFields(st))
+	fs, err := cfg.stationFields(st)
+	if err != nil {
+		t.Fatalf("stationFields: %v", err)
+	}
+	got := fieldValues(fs)
 	// IOTA has flags 1, UPPER (config.xml:1317); text fields are trimmed and
 	// uppercased on save (location.cpp:3485-3489).
 	want := []string{"KF0TST", "291", "EM10dh", "7", "4", "NA-001", "TX", "Travis"}
@@ -104,7 +111,11 @@ func TestStationFieldsCanada(t *testing.T) {
 	}
 	// Page 4 (dependency 1) is CA_PROVINCE CA_US_PARK ZERR
 	// (config.xml:7535-7539).
-	got := fieldNames(cfg.stationFields(st))
+	fs, err := cfg.stationFields(st)
+	if err != nil {
+		t.Fatalf("stationFields: %v", err)
+	}
+	got := fieldNames(fs)
 	want := []string{"CALL", "DXCC", "ITUZ", "CA_PROVINCE"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("names = %q, want %q", got, want)
@@ -120,7 +131,11 @@ func TestStationUnsetZonesOmitted(t *testing.T) {
 	}
 	// Unset CQZ/ITUZ select the [None] item, whose text is empty, so they
 	// are left out (knowledge.md §10.1; location.cpp:3733-3734).
-	for _, f := range cfg.stationFields(st) {
+	fs, err := cfg.stationFields(st)
+	if err != nil {
+		t.Fatalf("stationFields: %v", err)
+	}
+	for _, f := range fs {
 		if f.name == "CQZ" || f.name == "ITUZ" {
 			t.Errorf("unset %s present with value %q", f.name, f.value)
 		}
@@ -334,7 +349,10 @@ func FuzzValidateStation(f *testing.F) {
 		if err != nil && !errors.Is(err, ErrInvalidStation) {
 			t.Fatalf("err = %v, not ErrInvalidStation", err)
 		}
-		fs := cfg.stationFields(st)
+		fs, ferr := cfg.stationFields(st)
+		if (err == nil) != (ferr == nil) || (err != nil && err.Error() != ferr.Error()) {
+			t.Fatalf("ValidateStation = %v, stationFields = %v", err, ferr)
+		}
 		if err == nil && (len(fs) < 2 || fs[0].name != "CALL" || fs[1].name != "DXCC") {
 			t.Fatalf("valid station gives %v", fs)
 		}

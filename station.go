@@ -29,8 +29,9 @@ type Station struct {
 	// IOTA is the Islands On The Air reference. It is uppercased.
 	IOTA string
 	// Fields holds the other location fields by GAbbI id, such as
-	// "US_STATE": "TX". Values of list fields match the configuration's
-	// values ignoring case. The ids of the typed fields above (CALL, DXCC,
+	// "US_STATE": "TX". Values of list fields are the configuration's
+	// enum values, not their labels: "TX", not "Texas". They match
+	// ignoring case. The ids of the typed fields above (CALL, DXCC,
 	// GRIDSQUARE, ITUZ, CQZ and IOTA) are not allowed here.
 	Fields map[string]string
 }
@@ -88,25 +89,21 @@ func stationErr(field, format string, args ...any) error {
 //     fit the zone map of the DXCC entity and of the primary subdivision
 //     (state, province, oblast, prefecture or kunta). 0 matches any zone.
 //
+// Two rules are stricter than TrustedQSL:
+//
+//   - Call is run through the QSO callsign check. TrustedQSL does not check
+//     station callsigns, because it takes them from certificates.
+//   - A list value must be the configured enum value, compared ignoring
+//     case. TrustedQSL's tqsl_setLocationField also accepts a fuzzy match on
+//     the label (location.cpp:4154-4161), such as "Texas" for "TX"; this
+//     package rejects those.
+//
 // ValidateStation does not change st. The canonical forms (the configured
 // spelling of list values, uppercased callsign and IOTA) are applied when
 // the station is written.
 func (c *Config) ValidateStation(st Station) error {
-	_, err := c.resolveStation(st)
+	_, err := c.stationFields(st)
 	return err
-}
-
-// stationFields returns the tSTATION fields of st in configuration page
-// order, with canonical values, leaving out empty values and BADZONE fields.
-// It is the single source for the tSTATION record and the station part of
-// the sign data. It returns nil when st is invalid, so callers must call
-// ValidateStation first.
-func (c *Config) stationFields(st Station) []stationField {
-	fs, err := c.resolveStation(st)
-	if err != nil {
-		return nil
-	}
-	return fs
 }
 
 // rawStationValue returns the value st gives for the field id, before
@@ -136,8 +133,12 @@ func itoaNonZero(n int) string {
 	return strconv.Itoa(n)
 }
 
-// resolveStation validates st and returns its tSTATION fields.
-func (c *Config) resolveStation(st Station) ([]stationField, error) {
+// stationFields validates st and returns its tSTATION fields in
+// configuration page order, with canonical values, leaving out empty values
+// and BADZONE fields. It is the single source for the tSTATION record and
+// the station part of the sign data. When st is invalid it returns the error
+// ValidateStation returns.
+func (c *Config) stationFields(st Station) ([]stationField, error) {
 	if st.Call == "" {
 		return nil, stationErr("CALL", "callsign is required")
 	}
@@ -244,11 +245,11 @@ func (c *Config) resolveStationField(f locField, raw string, values map[string]s
 	case f.id == "CALL":
 		// The callsign list holds certificate callsigns
 		// (location.cpp:1820-1858), matched ignoring case
-		// (location.cpp:4146-4148). Checked in resolveStation.
+		// (location.cpp:4146-4148). Checked in stationFields.
 		return asciiUpper(raw), nil, nil
 	case f.id == "DXCC":
 		// The entity list (location.cpp:1860-1945). Checked in
-		// resolveStation.
+		// stationFields.
 		return raw, nil, nil
 	case f.intype == intypeDDList || f.intype == intypeList:
 		if f.enums != nil {

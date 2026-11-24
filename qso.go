@@ -41,6 +41,9 @@ type NormalizeOptions struct {
 // NormalizeQSO checks q and returns it in the form TrustedQSL signs, as its
 // ADIF converter does (tqslconvert.cpp):
 //
+//   - A field longer than TrustedQSL's ADIF limit, counted before trimming,
+//     is rejected: 20 bytes for CALL, FREQ, FREQ_RX, SAT_NAME and
+//     PROP_MODE, 16 for MODE and SUBMODE, 6 for BAND and BAND_RX.
 //   - Text fields are trimmed of ASCII whitespace (C isspace only, so a
 //     non-breaking space is kept) and CALL, BAND, BAND_RX, MODE, SUBMODE,
 //     PROP_MODE and SAT_NAME are uppercased (ASCII only). SAT_NAME "AO-07"
@@ -59,10 +62,29 @@ type NormalizeOptions struct {
 //     with, and only with, PROP_MODE "SAT".
 //   - Time is converted to UTC and truncated to the second.
 //
+// One deliberate deviation: a field that is empty after trimming counts as
+// unset. In TrustedQSL a present but whitespace-only field still counts as
+// set (tqslconvert.cpp:977-987) and fails a later check instead, so the
+// error message can differ.
+//
 // Errors are a [*QSOError] with Index -1 that wraps [ErrInvalidQSO]. Its
 // Field is the GAbbI field name and its Detail is TrustedQSL's message.
 // NormalizeQSO is idempotent: normalizing its result gives the same QSO.
 func (c *Config) NormalizeQSO(q QSO, opt NormalizeOptions) (QSO, error) {
+	// ADIF length limits apply to the raw value, before trimming
+	// (adif.cpp:448-459).
+	for _, f := range [...]struct {
+		name, value string
+	}{
+		{"CALL", q.Call}, {"BAND", q.Band}, {"MODE", q.Mode}, {"SUBMODE", q.Submode},
+		{"FREQ", q.Freq}, {"FREQ_RX", q.FreqRX}, {"BAND_RX", q.BandRX},
+		{"SAT_NAME", q.SatName}, {"PROP_MODE", q.PropMode},
+	} {
+		if len(f.value) > adifMaxLen(f.name) {
+			return QSO{}, qsoErr(f.name, "ADIF field "+f.name+" data length overflow")
+		}
+	}
+
 	// Trim (tqslconvert.cpp:960-969) and uppercase (tqslconvert.cpp:978,
 	// 986, 989, 1003, 1010, 1401-1404).
 	n := QSO{
@@ -160,6 +182,27 @@ func (c *Config) NormalizeQSO(q QSO, opt NormalizeOptions) (QSO, error) {
 		return QSO{}, qsoErr("SAT_NAME", "SAT_NAME set but PROP_MODE is not 'SAT'")
 	}
 	return n, nil
+}
+
+// adifMaxLen is the maximum data length, in bytes, TrustedQSL's ADIF reader
+// accepts for a QSO field: adif_qso_record_fields (tqslconvert.cpp:268-285)
+// with the limits from tqsllib.h:48-60.
+func adifMaxLen(field string) int {
+	switch field {
+	case "CALL":
+		return 20 // TQSL_CALLSIGN_MAX
+	case "BAND", "BAND_RX":
+		return 6 // TQSL_BAND_MAX
+	case "MODE", "SUBMODE":
+		return 16 // TQSL_MODE_MAX
+	case "FREQ", "FREQ_RX":
+		return 20 // TQSL_FREQ_MAX
+	case "SAT_NAME":
+		return 20 // TQSL_SATNAME_MAX
+	case "PROP_MODE":
+		return 20 // TQSL_PROPMODE_MAX
+	}
+	return 0
 }
 
 func qsoErr(field, detail string) error {

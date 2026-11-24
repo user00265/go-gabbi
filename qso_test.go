@@ -2,6 +2,7 @@ package gabbi
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -112,7 +113,10 @@ func TestNormalizeQSOMissing(t *testing.T) {
 	}{
 		// tqslconvert.cpp:1343-1365.
 		{"call", func(q *QSO) { q.Call = "" }, "CALL", "Invalid contact - QSO does not specify a Callsign"},
-		{"call skip", func(q *QSO) { q.Call = " " }, "CALL", "Invalid contact - QSO does not specify a Callsign"},
+		// Deliberate deviation: TQSL counts a present but whitespace-only
+		// CALL as set (tqslconvert.cpp:977-980) and rejects it later in
+		// checkCallSign; NormalizeQSO treats it as unset.
+		{"blank call", func(q *QSO) { q.Call = " " }, "CALL", "Invalid contact - QSO does not specify a Callsign"},
 		{"band", func(q *QSO) { q.Band = "" }, "BAND", "Invalid contact - QSO does not specify a band or frequency"},
 		{"mode", func(q *QSO) { q.Mode = ""; q.Submode = "FT4" }, "MODE", "Invalid contact - QSO does not specify a mode"},
 		{"date", func(q *QSO) { q.Time = time.Time{} }, "QSO_DATE", "Invalid contact - QSO does not specify a date"},
@@ -127,6 +131,51 @@ func TestNormalizeQSOMissing(t *testing.T) {
 			wantQSOError(t, err, tc.field, tc.detail)
 		})
 	}
+}
+
+func TestNormalizeQSOLength(t *testing.T) {
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	// Limits: tqsllib.h:48-60 via adif_qso_record_fields
+	// (tqslconvert.cpp:274-284). The ADIF reader compares the declared
+	// length, before trimming, and fails with "ADIF field %s data length
+	// overflow" (adif.cpp:227-228,448-459).
+	for _, tc := range []struct {
+		field string
+		max   int
+		set   func(*QSO, string)
+		// fill builds a value of length n that is valid at the limit.
+		fill func(n int) string
+	}{
+		{"CALL", 20, func(q *QSO, v string) { q.Call = v }, func(n int) string { return "W1" + strings.Repeat("A", n-2) }},
+		{"BAND", 6, func(q *QSO, v string) { q.Band = v }, func(n int) string { return strings.Repeat(" ", n-3) + "20M" }},
+		{"MODE", 16, func(q *QSO, v string) { q.Mode = v }, func(n int) string { return strings.Repeat(" ", n-2) + "CW" }},
+		{"SUBMODE", 16, func(q *QSO, v string) { q.Submode = v }, func(n int) string { return strings.Repeat(" ", n-3) + "PCW" }},
+		{"FREQ", 20, func(q *QSO, v string) { q.Freq = v }, func(n int) string { return "14.0" + strings.Repeat("0", n-4) }},
+		{"FREQ_RX", 20, func(q *QSO, v string) { q.FreqRX = v }, func(n int) string { return "14.0" + strings.Repeat("0", n-4) }},
+		{"BAND_RX", 6, func(q *QSO, v string) { q.BandRX = v }, func(n int) string { return strings.Repeat(" ", n-3) + "40M" }},
+		{"SAT_NAME", 20, func(q *QSO, v string) { q.PropMode = "SAT"; q.SatName = v }, func(n int) string { return strings.Repeat(" ", n-4) + "AO-7" }},
+		{"PROP_MODE", 20, func(q *QSO, v string) { q.PropMode = v }, func(n int) string { return strings.Repeat(" ", n-3) + "EME" }},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			q := baseQSO()
+			tc.set(&q, tc.fill(tc.max))
+			if _, err := cfg.NormalizeQSO(q, NormalizeOptions{}); err != nil {
+				t.Fatalf("at limit %d: %v", tc.max, err)
+			}
+			q = baseQSO()
+			tc.set(&q, tc.fill(tc.max+1))
+			_, err := cfg.NormalizeQSO(q, NormalizeOptions{})
+			wantQSOError(t, err, tc.field, "ADIF field "+tc.field+" data length overflow")
+		})
+	}
+	t.Run("padding", func(t *testing.T) {
+		// "W1AW" padded to 21 bytes trims to a valid call, but TQSL
+		// rejects the declared length first (adif.cpp:448-459).
+		q := baseQSO()
+		q.Call = "W1AW" + strings.Repeat(" ", 17)
+		_, err := cfg.NormalizeQSO(q, NormalizeOptions{})
+		wantQSOError(t, err, "CALL", "ADIF field CALL data length overflow")
+	})
 }
 
 func TestNormalizeQSOBand(t *testing.T) {
