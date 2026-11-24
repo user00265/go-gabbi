@@ -28,8 +28,12 @@ func errClass(err error) string {
 		{ErrCertMismatch, "ErrCertMismatch"},
 		{ErrUnsupportedKey, "ErrUnsupportedKey"},
 		{ErrDateRange, "ErrDateRange"},
+		{ErrInvalidDate, "ErrInvalidDate"},
+		{ErrExpired, "ErrExpired"},
 		{ErrInvalidQSO, "ErrInvalidQSO"},
 		{ErrInvalidStation, "ErrInvalidStation"},
+		{ErrConfigOutdated, "ErrConfigOutdated"},
+		{ErrConfig, "ErrConfig"},
 	} {
 		if errors.Is(err, s.err) {
 			return s.name
@@ -42,8 +46,12 @@ func errClass(err error) string {
 // It runs only when GABBI_REAL_P12 names a .p12 file, and never in CI. The
 // expected values are those of the owner's certificate, checked with
 // openssl. The test prints nothing that identifies the owner: no callsign,
-// name, e-mail, serial or path, and no error text that could hold them. It
-// writes no files.
+// name, e-mail, serial or path, and no error text or output bytes that
+// could hold them. It writes no files.
+//
+// The expected DXCC, QSO dates and superseded serial come from the current
+// certificate. After the certificate is renewed this test fails by design
+// until the constants are updated.
 func TestRealPKCS12(t *testing.T) {
 	path := os.Getenv("GABBI_REAL_P12")
 	if path == "" {
@@ -81,11 +89,11 @@ func TestRealPKCS12(t *testing.T) {
 
 	// Three cert bags: the leaf, the Production CA and the Root CA.
 	if len(chain) != 2 {
-		t.Errorf("chain has %d certificates, want 2", len(chain))
+		t.Error("chain does not have 2 certificates")
 	}
-	for i, ca := range chain {
+	for _, ca := range chain {
 		if !ca.IsCA {
-			t.Errorf("chain certificate %d is not a CA", i)
+			t.Error("chain certificate is not a CA")
 		}
 	}
 
@@ -93,8 +101,8 @@ func TestRealPKCS12(t *testing.T) {
 	if !ok {
 		t.Fatal("leaf key is not RSA")
 	}
-	if bits := leafPub.N.BitLen(); bits != 1024 {
-		t.Errorf("leaf key is %d bits, want 1024", bits)
+	if leafPub.N.BitLen() != 1024 {
+		t.Error("leaf key is not 1024 bits")
 	}
 
 	// Sign one synthetic QSO into memory.
@@ -108,8 +116,15 @@ func TestRealPKCS12(t *testing.T) {
 		t.Fatalf("WriteQSO failed (%s)", errClass(err))
 	}
 
-	rs := parseGAbbI(t, buf.Bytes())
-	wantTypes(t, rs, "TQSL_IDENT", "tCERT", "tSTATION", "tCONTACT")
+	// The buffer holds the callsign and the leaf certificate, so failures
+	// here report fixed strings only: no parser error, record type or value.
+	rs, err := parseGAbbIRecords(buf.Bytes())
+	if err != nil {
+		t.Fatal("writer output is malformed")
+	}
+	if strings.Join(recordTypes(rs), " ") != "TQSL_IDENT tCERT tSTATION tCONTACT" {
+		t.Fatal("writer output has unexpected records")
+	}
 	certText, _ := rs[1].get("CERTIFICATE")
 	der, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(certText, "\n", ""))
 	if err != nil || !bytes.Equal(der, c.X509.Raw) {
@@ -129,7 +144,7 @@ func TestRealPKCS12(t *testing.T) {
 		t.Fatal("signature is not base64")
 	}
 	if len(sig) != 128 {
-		t.Errorf("signature is %d bytes, want 128", len(sig))
+		t.Error("signature is not 128 bytes")
 	}
 	digest := sha1.Sum([]byte(sd))
 	if err := rsa.VerifyPKCS1v15(leafPub, crypto.SHA1, digest[:], sig); err != nil {

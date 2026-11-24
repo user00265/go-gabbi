@@ -10,6 +10,7 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -64,8 +65,19 @@ func (r gRecord) uid(t *testing.T, name string) int {
 // by scanning for the next '<', so a value holding '<' or newlines reads
 // back intact. Only '\n' may separate fields. A TQSL_IDENT field outside a
 // record is its own record; <Rec_Type> opens a record and <eor> closes it.
+// It fails the test on malformed input, printing the offending bytes.
 func parseGAbbI(t *testing.T, data []byte) []gRecord {
 	t.Helper()
+	rs, err := parseGAbbIRecords(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rs
+}
+
+// parseGAbbIRecords is parseGAbbI's core. Its errors may quote the input,
+// so callers holding sensitive output must not print them.
+func parseGAbbIRecords(data []byte) ([]gRecord, error) {
 	s := string(data)
 	var (
 		out []gRecord
@@ -79,11 +91,11 @@ func parseGAbbI(t *testing.T, data []byte) []gRecord {
 			break
 		}
 		if s[i] != '<' {
-			t.Fatalf("offset %d: want '<', got %q", i, s[i:min(len(s), i+20)])
+			return nil, fmt.Errorf("offset %d: want '<', got %q", i, s[i:min(len(s), i+20)])
 		}
 		end := strings.IndexByte(s[i:], '>')
 		if end < 0 {
-			t.Fatalf("offset %d: unterminated field header", i)
+			return nil, fmt.Errorf("offset %d: unterminated field header", i)
 		}
 		header := s[i+1 : i+end]
 		i += end + 1
@@ -92,7 +104,7 @@ func parseGAbbI(t *testing.T, data []byte) []gRecord {
 		if len(parts) > 1 {
 			n, err := strconv.Atoi(parts[1])
 			if err != nil || n < 0 || i+n > len(s) {
-				t.Fatalf("field %s: bad length %q", f.name, parts[1])
+				return nil, fmt.Errorf("field %s: bad length %q", f.name, parts[1])
 			}
 			if len(parts) > 2 {
 				f.typ = parts[2]
@@ -105,26 +117,26 @@ func parseGAbbI(t *testing.T, data []byte) []gRecord {
 			out = append(out, gRecord{Type: f.name, Fields: []gField{f}})
 		case f.name == "Rec_Type":
 			if cur != nil {
-				t.Fatalf("Rec_Type %s inside an open %s record", f.value, cur.Type)
+				return nil, fmt.Errorf("Rec_Type %s inside an open %s record", f.value, cur.Type)
 			}
 			cur = &gRecord{Type: f.value}
 		case f.name == "eor":
 			if cur == nil {
-				t.Fatalf("offset %d: <eor> outside a record", i)
+				return nil, fmt.Errorf("offset %d: <eor> outside a record", i)
 			}
 			out = append(out, *cur)
 			cur = nil
 		default:
 			if cur == nil {
-				t.Fatalf("field %s outside a record", f.name)
+				return nil, fmt.Errorf("field %s outside a record", f.name)
 			}
 			cur.Fields = append(cur.Fields, f)
 		}
 	}
 	if cur != nil {
-		t.Fatalf("unterminated %s record", cur.Type)
+		return nil, fmt.Errorf("unterminated %s record", cur.Type)
 	}
-	return out
+	return out, nil
 }
 
 // recordTypes returns the Type of each record.
