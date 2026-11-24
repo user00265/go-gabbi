@@ -176,24 +176,33 @@ type Credential struct {
 // then equal the certificate's public key, or the error wraps
 // [ErrCertMismatch].
 func NewCredential(c *Certificate, s crypto.Signer) (Credential, error) {
+	if err := checkCredential(c, s); err != nil {
+		return Credential{}, err
+	}
+	return Credential{Cert: c, Signer: s}, nil
+}
+
+// checkCredential runs the checks NewCredential documents. The Writer runs
+// them again, since a Credential can also be built as a literal.
+func checkCredential(c *Certificate, s crypto.Signer) error {
 	if c == nil || c.X509 == nil {
-		return Credential{}, fmt.Errorf("%w: nil certificate", ErrNoCertificate)
+		return fmt.Errorf("%w: nil certificate", ErrNoCertificate)
 	}
 	if s == nil {
-		return Credential{}, fmt.Errorf("%w: nil signer", ErrNoKey)
+		return fmt.Errorf("%w: nil signer", ErrNoKey)
 	}
 	pub, ok := s.Public().(*rsa.PublicKey)
 	if !ok || pub == nil || pub.N == nil {
-		return Credential{}, fmt.Errorf("%w: %T is not an RSA public key", ErrUnsupportedKey, s.Public())
+		return fmt.Errorf("%w: %T is not an RSA public key", ErrUnsupportedKey, s.Public())
 	}
 	if bits := pub.N.BitLen(); bits > maxKeyBits {
-		return Credential{}, fmt.Errorf("%w: RSA key is %d bits, TrustedQSL signs with at most %d",
+		return fmt.Errorf("%w: RSA key is %d bits, TrustedQSL signs with at most %d",
 			ErrUnsupportedKey, bits, maxKeyBits)
 	}
 	if !pub.Equal(c.X509.PublicKey) {
-		return Credential{}, fmt.Errorf("%w: signer key is not the key of %s's certificate", ErrCertMismatch, c.Callsign)
+		return fmt.Errorf("%w: signer key is not the key of %s's certificate", ErrCertMismatch, c.Callsign)
 	}
-	return Credential{Cert: c, Signer: s}, nil
+	return nil
 }
 
 // LoadPKCS12 reads a .p12 file exported by TrustedQSL and returns the
