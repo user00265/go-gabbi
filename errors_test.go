@@ -65,7 +65,7 @@ func TestQSOErrorMessage(t *testing.T) {
 func TestSentinelPrefix(t *testing.T) {
 	sentinels := []error{
 		ErrPassword, ErrNoCertificate, ErrNoKey, ErrUnsupportedKey, ErrCertMismatch,
-		ErrDateRange, ErrExpired, ErrInvalidQSO, ErrInvalidStation, ErrConfig,
+		ErrDateRange, ErrInvalidDate, ErrExpired, ErrInvalidQSO, ErrInvalidStation, ErrConfig,
 		ErrConfigOutdated, ErrDuplicate, ErrNoQSOs, ErrRestart,
 	}
 	seen := make(map[string]bool, len(sentinels))

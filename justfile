@@ -20,7 +20,7 @@ fuzz:
     for pkg in $(go list ./...); do
         for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
             echo "== $pkg $target"
-            go test -run '^$' -fuzz "^${target}\$" -fuzztime=30s "$pkg"
+            go test -run '^$' -fuzz "^${target}\$" -fuzztime=30s -fuzzminimizetime=1s "$pkg"
         done
     done
 

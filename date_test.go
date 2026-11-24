@@ -1,6 +1,7 @@
 package gabbi
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -40,8 +41,8 @@ func TestParseDate(t *testing.T) {
 		t.Run(tt.in, func(t *testing.T) {
 			got, err := ParseDate(tt.in)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("ParseDate(%q) = %v, want error", tt.in, got)
+				if !errors.Is(err, ErrInvalidDate) {
+					t.Fatalf("ParseDate(%q) = %v, %v; want ErrInvalidDate", tt.in, got, err)
 				}
 				return
 			}

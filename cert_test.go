@@ -208,6 +208,9 @@ func TestParseCertificateMalformed(t *testing.T) {
 			if !strings.Contains(err.Error(), tt.oid) {
 				t.Errorf("err = %q, want it to name %s", err, tt.oid)
 			}
+			if tt.name == "bad not-before" && !errors.Is(err, ErrInvalidDate) {
+				t.Errorf("err = %v, want it to wrap ErrInvalidDate too", err)
+			}
 		})
 	}
 }
@@ -310,6 +313,7 @@ func TestLoadPKCS12KeyOnly(t *testing.T) {
 
 func TestLoadPKCS12ErrorMapping(t *testing.T) {
 	notImpl := pkcs12.NotImplementedError("only password-protected PFX is implemented")
+	other := errors.New("pkcs12: error reading P12 data: asn1: syntax error")
 	tests := []struct {
 		name string
 		in   error
@@ -320,15 +324,23 @@ func TestLoadPKCS12ErrorMapping(t *testing.T) {
 		{"wrapped incorrect password", fmt.Errorf("x: %w", pkcs12.ErrIncorrectPassword), ErrPassword, pkcs12.ErrIncorrectPassword},
 		{"certificate missing", errors.New("pkcs12: certificate missing"), ErrNoCertificate, nil},
 		{"private key missing", errors.New("pkcs12: private key missing"), ErrNoKey, nil},
-		{"decryption", pkcs12.ErrDecryption, ErrNoCertificate, pkcs12.ErrDecryption},
-		{"not implemented", notImpl, ErrNoCertificate, notImpl},
-		{"other", errors.New("pkcs12: error reading P12 data: asn1: syntax error"), ErrNoCertificate, nil},
+		// Unmatched errors keep go-pkcs12's error and wrap no gabbi sentinel.
+		{"decryption", pkcs12.ErrDecryption, nil, pkcs12.ErrDecryption},
+		{"not implemented", notImpl, nil, notImpl},
+		{"other", other, nil, other},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := mapPKCS12Error(tt.in)
-			if !errors.Is(got, tt.want) {
+			if tt.want != nil && !errors.Is(got, tt.want) {
 				t.Errorf("mapPKCS12Error(%v) = %v, want it to wrap %v", tt.in, got, tt.want)
+			}
+			if tt.want == nil {
+				for _, s := range certSentinels {
+					if errors.Is(got, s) {
+						t.Errorf("mapPKCS12Error(%v) = %v, wraps sentinel %v, want none", tt.in, got, s)
+					}
+				}
 			}
 			if tt.keep != nil && !errors.Is(got, tt.keep) {
 				t.Errorf("mapPKCS12Error(%v) = %v, want it to keep %v", tt.in, got, tt.keep)
@@ -386,11 +398,18 @@ func TestLoadPKCS12KeyErrors(t *testing.T) {
 func TestLoadPKCS12Garbage(t *testing.T) {
 	for _, data := range [][]byte{nil, {}, []byte("not a pfx"), {0x30, 0x03, 0x02, 0x01, 0x03}} {
 		_, _, err := LoadPKCS12(data, "")
-		if !errors.Is(err, ErrNoCertificate) {
-			t.Errorf("LoadPKCS12(%x): err = %v, want ErrNoCertificate", data, err)
+		if err == nil {
+			t.Errorf("LoadPKCS12(%x): err = nil, want an error", data)
+			continue
+		}
+		if errors.Is(err, ErrNoCertificate) {
+			t.Errorf("LoadPKCS12(%x): err = %v, want a decode error, not ErrNoCertificate", data, err)
 		}
 	}
 }
+
+// certSentinels are the gabbi sentinels LoadPKCS12 can return.
+var certSentinels = []error{ErrPassword, ErrNoCertificate, ErrNoKey, ErrUnsupportedKey, ErrCertMismatch}
 
 // otherSigner is a crypto.Signer whose public key is not RSA.
 type otherSigner struct{ crypto.Signer }
@@ -462,16 +481,15 @@ func FuzzLoadPKCS12(f *testing.F) {
 	f.Add(encodeP12(f, pkcs12.LegacyDES, p.Key, p.Leaf, cas, ""), "")
 	f.Add(encodeP12(f, pkcs12.Passwordless, p.Key, p.Leaf, cas, ""), "")
 	f.Add(encodeP12(f, pkcs12.Passwordless, p.Key, p.Leaf, cas, ""), "spare")
-	sentinels := []error{ErrPassword, ErrNoCertificate, ErrNoKey, ErrUnsupportedKey, ErrCertMismatch}
+	// Invariant: no panic, and either a non-nil error or a complete
+	// credential. Errors need not wrap a gabbi sentinel (Ruling L).
 	f.Fuzz(func(t *testing.T, data []byte, password string) {
 		cred, chain, err := LoadPKCS12(data, password)
 		if err != nil {
-			for _, s := range sentinels {
-				if errors.Is(err, s) {
-					return
-				}
+			if chain != nil || cred.Cert != nil || cred.Signer != nil {
+				t.Fatalf("error %v returned with non-zero results", err)
 			}
-			t.Fatalf("error wraps no gabbi sentinel: %v", err)
+			return
 		}
 		if cred.Cert == nil || cred.Signer == nil || cred.Cert.Callsign == "" {
 			t.Fatalf("success with incomplete credential: %+v", cred)

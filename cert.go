@@ -204,10 +204,12 @@ func NewCredential(c *Certificate, s crypto.Signer) (Credential, error) {
 // A file with no MAC at all is read even when a password is given. A wrong
 // password gives an error wrapping [ErrPassword]. The user certificate is the
 // one whose public key matches the private key, wherever it sits in the
-// file. A file without a certificate or a readable structure gives
-// [ErrNoCertificate], one without a key gives [ErrNoKey], a key that matches
-// no certificate gives [ErrCertMismatch], and a key TrustedQSL cannot sign
-// with gives [ErrUnsupportedKey].
+// file. A file without a certificate gives [ErrNoCertificate], one without a
+// key gives [ErrNoKey], a key that matches no certificate gives
+// [ErrCertMismatch], and a key TrustedQSL cannot sign with gives
+// [ErrUnsupportedKey]. Any other decoding failure, such as malformed or
+// unsupported PKCS#12 data, is returned wrapping go-pkcs12's own error and
+// no gabbi sentinel.
 //
 // The password never appears in returned errors. Go strings cannot be
 // cleared, so callers that care should drop their copy promptly.
@@ -267,9 +269,9 @@ const (
 	p12NoKey  = "pkcs12: private key missing"
 )
 
-// mapPKCS12Error turns a go-pkcs12 error into one that wraps a gabbi
-// sentinel. The original error stays in the chain for errors.Is and
-// errors.As.
+// mapPKCS12Error maps the go-pkcs12 errors that have a gabbi meaning to the
+// matching sentinel. Any other error is wrapped without a sentinel. The
+// original error always stays in the chain for errors.Is and errors.As.
 func mapPKCS12Error(err error) error {
 	switch {
 	case err == nil:
@@ -281,6 +283,6 @@ func mapPKCS12Error(err error) error {
 	case err.Error() == p12NoKey:
 		return fmt.Errorf("%w: %w", ErrNoKey, err)
 	default:
-		return fmt.Errorf("%w: cannot read PKCS#12 data: %w", ErrNoCertificate, err)
+		return fmt.Errorf("gabbi: decode PKCS#12: %w", err)
 	}
 }

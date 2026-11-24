@@ -35,7 +35,7 @@ func ParseDate(s string) (Date, error) {
 		d.Month = time.Month(strtol(rest))
 		j := strings.IndexByte(rest, '-')
 		if j < 0 {
-			return Date{}, fmt.Errorf("gabbi: invalid date %q", s)
+			return Date{}, fmt.Errorf("%w: %q", ErrInvalidDate, s)
 		}
 		d.Day = strtol(rest[j+1:])
 	} else if len(s) == 8 {
@@ -43,10 +43,10 @@ func ParseDate(s string) (Date, error) {
 		d.Month = time.Month(strtol(s[4:6]))
 		d.Day = strtol(s[6:])
 	} else {
-		return Date{}, fmt.Errorf("gabbi: invalid date %q", s)
+		return Date{}, fmt.Errorf("%w: %q", ErrInvalidDate, s)
 	}
 	if !d.valid() {
-		return Date{}, fmt.Errorf("gabbi: invalid date %q", s)
+		return Date{}, fmt.Errorf("%w: %q", ErrInvalidDate, s)
 	}
 	return d, nil
 }

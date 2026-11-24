@@ -30,6 +30,10 @@ var (
 	// range or the caller's date filter.
 	ErrDateRange = errors.New("gabbi: QSO date out of range")
 
+	// ErrInvalidDate means a date string is not a valid YYYY-MM-DD or
+	// YYYYMMDD date under TrustedQSL's rules.
+	ErrInvalidDate = errors.New("gabbi: invalid date")
+
 	// ErrExpired means the certificate has expired.
 	ErrExpired = errors.New("gabbi: certificate expired")
 
