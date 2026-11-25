@@ -37,6 +37,9 @@ var (
 	// ErrExpired means the certificate has expired.
 	ErrExpired = errors.New("gabbi: certificate expired")
 
+	// ErrChain means a certificate chain could not be verified.
+	ErrChain = errors.New("gabbi: certificate chain does not verify")
+
 	// ErrInvalidQSO means a QSO field is missing or invalid.
 	ErrInvalidQSO = errors.New("gabbi: invalid QSO")
 
