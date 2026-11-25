@@ -81,7 +81,8 @@ type NormalizeOptions struct {
 //
 // Errors are a [*QSOError] with Index -1 that wraps [ErrInvalidQSO]. Its
 // Field is the GAbbI field name and its Detail is TrustedQSL's message.
-// NormalizeQSO is idempotent: normalizing its result gives the same QSO.
+// Reapplying NormalizeQSO can map a mode again if the configuration contains
+// chained ADIF mappings; callers should normalize each QSO once.
 // A nil Config gives an error wrapping [ErrConfig].
 func (c *Config) NormalizeQSO(q QSO, opt NormalizeOptions) (QSO, error) {
 	if c == nil {

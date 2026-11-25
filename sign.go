@@ -336,8 +336,8 @@ func (s *signer) one(i int, q QSO) (r Result, fatal error) {
 		return r, nil
 	}
 	// The value checks (tqslconvert.cpp:1390-1490) come before the
-	// certificate lookup (1537). prepare normalizes again, which changes
-	// nothing as NormalizeQSO is idempotent.
+	// certificate lookup (1537). Pass the normalized QSO to the writer so
+	// it need not repeat normalization.
 	n, err := s.cfg.NormalizeQSO(q, s.opt.Normalize)
 	if err != nil {
 		return fail(err)
@@ -346,7 +346,7 @@ func (s *signer) one(i int, q QSO) (r Result, fatal error) {
 	if err != nil {
 		return fail(err)
 	}
-	p, err := s.wr.prepare(cred, s.st, n)
+	p, err := s.wr.prepareQSO(cred, s.st, n, &q)
 	if err != nil {
 		if p.valid {
 			// Signing failed after the preamble, which tqsl has written.

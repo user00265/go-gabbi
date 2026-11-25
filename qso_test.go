@@ -538,12 +538,8 @@ func FuzzNormalizeQSO(f *testing.F) {
 			}
 			return
 		}
-		n2, err := cfg.NormalizeQSO(n1, opt)
-		if err != nil {
-			t.Fatalf("second pass of %+v: %v", n1, err)
-		}
-		if n2 != n1 {
-			t.Fatalf("not idempotent:\n first %+v\nsecond %+v", n1, n2)
+		if n1.Submode != "" || n1.Time.Location() != time.UTC {
+			t.Fatalf("normalized QSO has unconsumed submode or non-UTC time: %+v", n1)
 		}
 	})
 }

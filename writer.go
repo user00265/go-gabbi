@@ -198,6 +198,12 @@ type pending struct {
 // preamble is valid and whose contact is nil, so the caller can still
 // commit the preamble as TrustedQSL would have written it.
 func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
+	return wr.prepareQSO(c, st, q, nil)
+}
+
+// prepareQSO receives the original input from Sign after its first
+// normalization. Direct WriteQSO callers pass nil and normalize here.
+func (wr *Writer) prepareQSO(c Credential, st Station, q QSO, original *QSO) (pending, error) {
 	if wr == nil {
 		return pending{}, fmt.Errorf("%w: nil Writer", ErrConfig)
 	}
@@ -212,9 +218,13 @@ func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 	}
 	cert := c.Cert
 
-	n, err := wr.cfg.NormalizeQSO(q, wr.opt)
-	if err != nil {
-		return pending{}, err
+	n := q
+	if original == nil {
+		var err error
+		n, err = wr.cfg.NormalizeQSO(q, wr.opt)
+		if err != nil {
+			return pending{}, err
+		}
 	}
 	fields, err := wr.cfg.stationFields(st)
 	if err != nil {
@@ -269,6 +279,28 @@ func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 		b.WriteString(recStation(fields, p.stationUID, p.certUID) + "\n")
 	}
 	p.preamble = []byte(b.String())
+	if original != nil {
+		// tqsl_getConverterGABBI re-enters its mode mapping after returning
+		// each tCERT or tSTATION record (tqslconvert.cpp:1408-1429,
+		// 1562-1576, 1813-1816). Submode stays on its converter record.
+		passes := 0
+		if p.newCert {
+			passes++
+		}
+		if p.newStation {
+			passes++
+		}
+		submode := asciiUpper(trimC(original.Submode))
+		for i := 0; i < passes; i++ {
+			if mode := wr.cfg.mapMode(n.Mode, submode); mode != "" {
+				n.Mode = mode
+			}
+			if !wr.cfg.hasMode(n.Mode) {
+				return p, qsoErr("MODE", "Invalid MODE ("+n.Mode+")")
+			}
+		}
+		p.QSO = n
+	}
 
 	// Signing happens in tqsl_getGABBItCONTACTData (tqslconvert.cpp:1820),
 	// after the preamble records have been returned.

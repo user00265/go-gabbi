@@ -1062,3 +1062,56 @@ func TestSignValueCheckBeforeCertLookup(t *testing.T) {
 		}
 	}
 }
+
+func TestSignModeMappingMatchesTrustedQSLPreamble(t *testing.T) {
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	// Debian TrustedQSL 2.8.7, with this chained mapping and two contacts at
+	// the same station, emits DATA after tCERT/tSTATION and then SSB.
+	cfg.adifMap["CW"] = "SSB"
+	cfg.adifMap["SSB"] = "DATA"
+	first, second := writerQSO("W1AW", 1), writerQSO("W1AW", 2)
+	first.Mode, second.Mode = "CW", "CW"
+	var out bytes.Buffer
+	report, err := Sign(context.Background(), &out, cfg, []Credential{newTestCredential(t)}, usStation(), slices.Values([]QSO{first, second}), SignOptions{Action: Compliant})
+	if err != nil || report.Signed != 2 {
+		t.Fatalf("Sign = %v, report %+v", err, report)
+	}
+	records := parseGAbbI(t, out.Bytes())
+	var modes []string
+	for _, record := range records {
+		if record.Type == "tCONTACT" {
+			mode, ok := record.get("MODE")
+			if !ok {
+				t.Fatal("contact has no MODE")
+			}
+			modes = append(modes, mode)
+		}
+	}
+	if !slices.Equal(modes, []string{"DATA", "SSB"}) {
+		t.Fatalf("contact modes = %v, want [DATA SSB]", modes)
+	}
+}
+
+func TestSignModeRemappingRetainsSubmode(t *testing.T) {
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	cfg.adifMap["CW%USB"] = "SSB"
+	cfg.adifMap["SSB%USB"] = "DATA"
+	cfg.adifMap["DATA%USB"] = "DATA"
+	q := writerQSO("W1AW", 1)
+	q.Mode, q.Submode = "CW", "USB"
+	var out bytes.Buffer
+	report, err := Sign(context.Background(), &out, cfg, []Credential{newTestCredential(t)}, usStation(), slices.Values([]QSO{q}), SignOptions{Action: Compliant})
+	if err != nil || report.Signed != 1 {
+		t.Fatalf("Sign = %v, report %+v", err, report)
+	}
+	for _, record := range parseGAbbI(t, out.Bytes()) {
+		if record.Type == "tCONTACT" {
+			mode, _ := record.get("MODE")
+			if mode != "DATA" {
+				t.Fatalf("MODE = %q, want DATA", mode)
+			}
+			return
+		}
+	}
+	t.Fatal("no contact")
+}
