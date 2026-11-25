@@ -136,6 +136,66 @@ func TestParseTQ6IgnoresBeginPrefixInNotes(t *testing.T) {
 	}
 }
 
+// OpenSSL 3.6.5 PEM_read_bio_X509 skips incomplete BEGIN lines and lines
+// with trailing non-whitespace junk; TrustedQSL calls it once
+// (openssl_cert.cpp:424-425).
+func TestParseTQ6SkipsMalformedBeginLines(t *testing.T) {
+	p := newTQ6PKI(t)
+	key := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte{1, 2, 3}}))
+	for _, line := range []struct {
+		name string
+		text string
+	}{
+		{"missing delimiter", "-----BEGIN CERTIFICATE\n"},
+		{"short delimiter", "-----BEGIN CERTIFICATE----\n"},
+		{"trailing junk", "-----BEGIN CERTIFICATE-----junk\n"},
+		{"noncertificate trailing junk", "-----BEGIN PUBLIC KEY-----junk\n"},
+	} {
+		for _, prefix := range []struct {
+			name string
+			text string
+		}{{"before certificate", ""}, {"between blocks", key}} {
+			t.Run(line.name+"/"+prefix.name, func(t *testing.T) {
+				doc := tq6Doc(certEl("usercert", prefix.text+line.text+pemCert(p.Leaf)), "")
+				tq6, err := ParseTQ6(bytes.NewReader(doc))
+				if err != nil {
+					t.Fatalf("ParseTQ6: %v", err)
+				}
+				sameCerts(t, "Users", tq6.Users, []*x509.Certificate{p.Leaf})
+			})
+		}
+	}
+}
+
+// Complete BEGIN lines start a block even with trailing whitespace, an
+// empty label or an extra dash (direct OpenSSL 3.6.5 probe).
+func TestParseTQ6RejectsMalformedCompleteBlocks(t *testing.T) {
+	p := newTQ6PKI(t)
+	key := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte{1, 2, 3}}))
+	for _, line := range []struct {
+		name string
+		text string
+	}{
+		{"space", "-----BEGIN CERTIFICATE----- \n"},
+		{"tab", "-----BEGIN CERTIFICATE-----\t\n"},
+		{"extra dash", "-----BEGIN CERTIFICATE------\n"},
+		{"empty label", "-----BEGIN -----\n"},
+		{"junk ending in delimiter", "-----BEGIN CERTIFICATE-----junk-----\n"},
+	} {
+		for _, prefix := range []struct {
+			name string
+			text string
+		}{{"before certificate", ""}, {"between blocks", key}} {
+			t.Run(line.name+"/"+prefix.name, func(t *testing.T) {
+				doc := tq6Doc(certEl("usercert", prefix.text+line.text+pemCert(p.Leaf)), "")
+				if _, err := ParseTQ6(bytes.NewReader(doc)); !errors.Is(err, ErrTQ6) {
+					t.Errorf("ParseTQ6 error = %v, want ErrTQ6", err)
+				}
+			})
+		}
+	}
+}
+
 // PEM_read_bio_X509 (openssl_cert.cpp:424) skips PEM blocks whose label is
 // not a certificate label and reads on (OpenSSL master
 // crypto/pem/pem_lib.c:239-259, check_pem at 128-200).
@@ -240,6 +300,10 @@ func TestParseTQ6Errors(t *testing.T) {
 		// block's DER does not parse.
 		{"corrupt first cert block, valid second", tq6Doc(certEl("rootcert",
 			"-----BEGIN CERTIFICATE-----\n!!!! not base64 !!!!\n-----END CERTIFICATE-----\n"+pemCert(p.Root)), "")},
+		{"corrupt noncertificate block, valid second", tq6Doc(certEl("rootcert",
+			"-----BEGIN PUBLIC KEY-----\n!!!!\n-----END PUBLIC KEY-----\n"+pemCert(p.Root)), "")},
+		{"wrong end label, valid second", tq6Doc(certEl("rootcert",
+			"-----BEGIN CERTIFICATE-----\nMIIB\n-----END PUBLIC KEY-----\n"+pemCert(p.Root)), "")},
 		{"BEGIN without END, valid second", tq6Doc(certEl("rootcert",
 			"-----BEGIN CERTIFICATE-----\nMIIB\n"+pemCert(p.Root)), "")},
 		{"first cert block bad DER, valid second", tq6Doc(certEl("rootcert", badDER+pemCert(p.Root)), "")},

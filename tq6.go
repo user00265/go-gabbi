@@ -185,14 +185,17 @@ func firstPEMCert(s string) (*x509.Certificate, error) {
 // pemBegin opens a PEM encapsulation boundary line.
 const pemBegin = "-----BEGIN "
 
-// pemBeginLine returns the index of the first "-----BEGIN " at the start of a
-// line in s, or -1.
+// pemBeginLine finds the next complete BEGIN boundary. OpenSSL strips trailing
+// whitespace before checking for the final five dashes (PEM_read_bio_X509,
+// OpenSSL 3.6.5); incomplete lines and lines ending in other text are skipped.
 func pemBeginLine(s string) int {
-	if strings.HasPrefix(s, pemBegin) {
-		return 0
-	}
-	if j := strings.Index(s, "\n"+pemBegin); j >= 0 {
-		return j + 1
+	for offset := 0; offset < len(s); {
+		line, _, _ := strings.Cut(s[offset:], "\n")
+		if strings.HasPrefix(line, pemBegin) &&
+			strings.HasSuffix(strings.TrimRight(line[len(pemBegin):], " \t\r\v\f"), "-----") {
+			return offset
+		}
+		offset += len(line) + 1
 	}
 	return -1
 }
