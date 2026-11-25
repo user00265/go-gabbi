@@ -224,8 +224,9 @@ func TestVerifyChainCorruptedSignatureWithExpiryAllowed(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = VerifyChain(tampered, []*x509.Certificate{ca}, []*x509.Certificate{root}, VerifyOptions{Now: chainTestNow.AddDate(3, 0, 0), AllowExpiredCA: true, AllowExpiredLeaf: true})
-	if !errors.Is(err, ErrChain) {
-		t.Fatalf("corrupted signature accepted: %v", err)
+	var authorityErr x509.UnknownAuthorityError
+	if !errors.Is(err, ErrChain) || !errors.As(err, &authorityErr) || !strings.Contains(err.Error(), "depth unavailable") || !strings.Contains(err.Error(), "ECDSA verification failure") {
+		t.Fatalf("corrupted signature diagnostic: %v", err)
 	}
 }
 
@@ -235,8 +236,52 @@ func TestVerifyChainConstraintsWithExpiryAllowed(t *testing.T) {
 	issuer := chainTestCert(t, "not a CA", issuerKey, root, rootKey, chainTestNow.AddDate(-4, 0, 0), chainTestNow.AddDate(-2, 0, 0), false, 2)
 	leaf := chainTestCert(t, "leaf", leafKey, issuer, issuerKey, chainTestNow.AddDate(-1, 0, 0), chainTestNow.AddDate(1, 0, 0), false, 3)
 	_, err := VerifyChain(leaf, []*x509.Certificate{issuer}, []*x509.Certificate{root}, VerifyOptions{Now: chainTestNow, AllowExpiredCA: true})
-	if !errors.Is(err, ErrChain) {
-		t.Fatalf("non-CA issuer accepted: %v", err)
+	var authorityErr x509.UnknownAuthorityError
+	if !errors.Is(err, ErrChain) || !errors.As(err, &authorityErr) || !strings.Contains(err.Error(), "depth unavailable") || !strings.Contains(err.Error(), "cannot sign") {
+		t.Fatalf("non-CA issuer diagnostic: %v", err)
+	}
+}
+
+func TestVerifyChainExpiredLeafWithoutVerifiablePath(t *testing.T) {
+	leaf, ca, root := chainTestFixture(t)
+	der := bytes.Clone(leaf.Raw)
+	der[len(der)-1] ^= 1
+	tampered, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = VerifyChain(tampered, []*x509.Certificate{ca}, []*x509.Certificate{root}, VerifyOptions{Now: leaf.NotAfter.Add(time.Second), AllowExpiredCA: true})
+	var invalid x509.CertificateInvalidError
+	if !errors.Is(err, ErrChain) || !errors.As(err, &invalid) || invalid.Reason != x509.Expired || !strings.Contains(err.Error(), "depth 0") || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("expired leaf diagnostic: %v", err)
+	}
+}
+
+func TestVerifyChainAmbiguousCandidateFailureDepth(t *testing.T) {
+	rootKey, issuerKey, leafKey := chainTestKey(t), chainTestKey(t), chainTestKey(t)
+	root := chainTestCert(t, "root", rootKey, nil, nil, chainTestNow.AddDate(-5, 0, 0), chainTestNow.AddDate(5, 0, 0), true, 1)
+	issuer := chainTestCert(t, "issuer", issuerKey, root, rootKey, chainTestNow.AddDate(-2, 0, 0), chainTestNow.AddDate(2, 0, 0), true, 2)
+	leaf := chainTestCert(t, "leaf", leafKey, issuer, issuerKey, chainTestNow.AddDate(-1, 0, 0), chainTestNow.AddDate(1, 0, 0), false, 3)
+	// An unrelated root leaves the issuer without a verified path. The error's
+	// certificate can be an intermediate, whose depth cannot be inferred safely.
+	unrelatedKey := chainTestKey(t)
+	unrelated := chainTestCert(t, "unrelated", unrelatedKey, nil, nil, chainTestNow.AddDate(-5, 0, 0), chainTestNow.AddDate(5, 0, 0), true, 4)
+	_, err := VerifyChain(leaf, []*x509.Certificate{issuer}, []*x509.Certificate{unrelated}, VerifyOptions{Now: chainTestNow})
+	var authorityErr x509.UnknownAuthorityError
+	if !errors.Is(err, ErrChain) || !errors.As(err, &authorityErr) || !strings.Contains(err.Error(), "depth unavailable") || !strings.Contains(err.Error(), "unknown authority") {
+		t.Fatalf("untrusted issuer diagnostic: %v", err)
+	}
+}
+
+func TestVerifyChainAlternativeCAAfterConstraintFailure(t *testing.T) {
+	rootKey, issuerKey, leafKey := chainTestKey(t), chainTestKey(t), chainTestKey(t)
+	root := chainTestCert(t, "root", rootKey, nil, nil, chainTestNow.AddDate(-5, 0, 0), chainTestNow.AddDate(5, 0, 0), true, 1)
+	bad := chainTestCert(t, "issuer", issuerKey, root, rootKey, chainTestNow.AddDate(-2, 0, 0), chainTestNow.AddDate(2, 0, 0), false, 2)
+	good := chainTestCert(t, "issuer", issuerKey, root, rootKey, chainTestNow.AddDate(-2, 0, 0), chainTestNow.AddDate(2, 0, 0), true, 3)
+	leaf := chainTestCert(t, "leaf", leafKey, good, issuerKey, chainTestNow.AddDate(-1, 0, 0), chainTestNow.AddDate(1, 0, 0), false, 4)
+	chain, err := VerifyChain(leaf, []*x509.Certificate{bad, good}, []*x509.Certificate{root}, VerifyOptions{Now: chainTestNow})
+	if err != nil || len(chain) != 3 || !bytes.Equal(chain[1].Raw, good.Raw) {
+		t.Fatalf("valid alternative after rejected issuer: %v, %v", chain, err)
 	}
 }
 

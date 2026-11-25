@@ -3,6 +3,7 @@ package gabbi
 import (
 	"bytes"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -22,6 +23,8 @@ type VerifyOptions struct {
 // returns a chain in leaf-to-root order. Roots are never taken from the system.
 // Not-yet-valid certificates are rejected even when expiry is allowed. The
 // expiry options affect validity dates only, not signatures or constraints.
+// Failure details identify a candidate chain's depth when available. Other
+// failures report that depth is unavailable and retain the X.509 error.
 // Go's X.509 verifier rejects SHA-1-signed certificates and does not check
 // revocation.
 //
@@ -104,6 +107,17 @@ func VerifyChain(leaf *x509.Certificate, intermediates, roots []*x509.Certificat
 	}
 	chains, err := verifyLeaf.Verify(verifyOptions)
 	if err != nil {
+		// Verify checks the leaf first. An Expired error naming the leaf is
+		// unambiguous even if no issuer can be verified.
+		var invalid x509.CertificateInvalidError
+		if errors.As(err, &invalid) && invalid.Reason == x509.Expired && invalid.Cert != nil && bytes.Equal(invalid.Cert.Raw, parsedLeaf.Raw) {
+			if now.Before(parsedLeaf.NotBefore) {
+				return nil, fmt.Errorf("%w: depth 0: certificate not yet valid: %w", ErrChain, err)
+			}
+			if now.After(parsedLeaf.NotAfter) && !opt.AllowExpiredLeaf {
+				return nil, fmt.Errorf("%w: depth 0: certificate expired: %w", ErrChain, err)
+			}
+		}
 		// Relax all dates only for a diagnostic path, never for acceptance.
 		diagnosticLeaf := *parsedLeaf
 		diagnosticLeaf.NotBefore, diagnosticLeaf.NotAfter = now, now
@@ -126,14 +140,14 @@ func VerifyChain(leaf *x509.Certificate, intermediates, roots []*x509.Certificat
 					return nil, fmt.Errorf("%w: depth %d: %w", ErrChain, depth, parseErr)
 				}
 				if now.Before(original.NotBefore) {
-					return nil, fmt.Errorf("%w: depth %d: certificate not yet valid", ErrChain, depth)
+					return nil, fmt.Errorf("%w: candidate chain depth %d: certificate not yet valid: %w", ErrChain, depth, err)
 				}
 				if now.After(original.NotAfter) && (depth == 0 && !opt.AllowExpiredLeaf || depth > 0 && !opt.AllowExpiredCA) {
-					return nil, fmt.Errorf("%w: depth %d: certificate expired", ErrChain, depth)
+					return nil, fmt.Errorf("%w: candidate chain depth %d: certificate expired: %w", ErrChain, depth, err)
 				}
 			}
 		}
-		return nil, fmt.Errorf("%w: %w", ErrChain, err)
+		return nil, fmt.Errorf("%w: depth unavailable: verification error: %w", ErrChain, err)
 	}
 	chain := make([]*x509.Certificate, len(chains[0]))
 	for i, cert := range chains[0] {
