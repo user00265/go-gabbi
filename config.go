@@ -23,8 +23,8 @@ const (
 	MinConfigMinor = 34
 )
 
-// maxConfigSize caps the decompressed configuration. The real file is about
-// 480 KB.
+// maxConfigSize caps the decompressed configuration and .tq6 input. The real
+// config file is about 480 KB.
 const maxConfigSize = 16 << 20
 
 var errConfigTooLarge = errors.New("input exceeds 16 MiB")
@@ -144,24 +144,11 @@ type entity struct {
 //     the minimum supported version, 11.34), download it again. If LoTW
 //     itself is serving an older file, report that and do not sign.
 func ParseConfig(r io.Reader) (*Config, error) {
-	br := bufio.NewReader(r)
-	var src io.Reader = br
-	magic, err := br.Peek(2)
-	if err != nil && !errors.Is(err, io.EOF) {
+	src, err := openTQSLData(r)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
-	if len(magic) == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
-		zr, err := gzip.NewReader(br)
-		if err != nil {
-			return nil, fmt.Errorf("%w: gzip: %w", ErrConfig, err)
-		}
-		// Reading to EOF below verifies the checksum, so Close has
-		// nothing left to report.
-		defer func() { _ = zr.Close() }()
-		src = zr
-	}
-
-	d := xml.NewDecoder(&capReader{r: src, left: maxConfigSize})
+	d := xml.NewDecoder(src)
 	cfg, err := decodeRoot(d)
 	if err != nil {
 		return nil, err
@@ -177,6 +164,28 @@ func ParseConfig(r io.Reader) (*Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// openTQSLData returns the content of r, gunzipped when it starts with the
+// gzip magic bytes, as TrustedQSL's gzopen reads both forms (xml.cpp:116,130).
+// The returned reader fails with errConfigTooLarge past maxConfigSize
+// decompressed bytes. Callers read it to EOF, which also verifies the gzip
+// checksum, so the gzip reader needs no Close.
+func openTQSLData(r io.Reader) (io.Reader, error) {
+	br := bufio.NewReader(r)
+	var src io.Reader = br
+	magic, err := br.Peek(2)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	if len(magic) == 2 && magic[0] == 0x1f && magic[1] == 0x8b {
+		zr, err := gzip.NewReader(br)
+		if err != nil {
+			return nil, fmt.Errorf("gzip: %w", err)
+		}
+		src = zr
+	}
+	return &capReader{r: src, left: maxConfigSize}, nil
 }
 
 // capReader fails with errConfigTooLarge once more than left bytes are read.

@@ -188,8 +188,8 @@ func checkCredential(c *Certificate, s crypto.Signer) error {
 	if c == nil || c.X509 == nil {
 		return fmt.Errorf("%w: nil certificate", ErrNoCertificate)
 	}
-	if s == nil {
-		return fmt.Errorf("%w: nil signer", ErrNoKey)
+	if err := checkSignerNil(s); err != nil {
+		return err
 	}
 	pub, ok := s.Public().(*rsa.PublicKey)
 	if !ok || pub == nil || pub.N == nil {
@@ -201,6 +201,15 @@ func checkCredential(c *Certificate, s crypto.Signer) error {
 	}
 	if !pub.Equal(c.X509.PublicKey) {
 		return fmt.Errorf("%w: signer key is not the key of %s's certificate", ErrCertMismatch, c.Callsign)
+	}
+	return nil
+}
+
+// checkSignerNil returns ErrNoKey for a nil signer, including a typed nil
+// *rsa.PrivateKey, whose Public method panics.
+func checkSignerNil(s crypto.Signer) error {
+	if k, ok := s.(*rsa.PrivateKey); s == nil || (ok && k == nil) {
+		return fmt.Errorf("%w: nil signer", ErrNoKey)
 	}
 	return nil
 }

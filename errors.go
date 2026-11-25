@@ -51,6 +51,11 @@ var (
 	// supported version. Download a current config.tq6 from LoTW.
 	ErrConfigOutdated = errors.New("gabbi: configuration outdated")
 
+	// ErrTQ6 means a .tq6 file could not be parsed: it is not a <tqsldata>
+	// document, or a certificate in it is missing or malformed. An error in
+	// its <tqslconfig> also wraps [ErrConfig] or [ErrConfigOutdated].
+	ErrTQ6 = errors.New("gabbi: invalid .tq6 file")
+
 	// ErrDuplicate means the QSO was already signed and recorded in the
 	// duplicate store.
 	ErrDuplicate = errors.New("gabbi: duplicate QSO")
