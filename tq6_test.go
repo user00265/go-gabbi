@@ -115,8 +115,22 @@ func TestParseTQ6LeadingText(t *testing.T) {
 	sameCerts(t, "Roots", tq6.Roots, []*x509.Certificate{p.Root})
 }
 
+// PEM_read_bio_X509 (openssl_cert.cpp:424) skips PEM blocks whose label is
+// not a certificate label and reads on (OpenSSL master
+// crypto/pem/pem_lib.c:239-259, check_pem at 128-200).
+func TestParseTQ6SkipsNonCertificateBlocks(t *testing.T) {
+	p := newTQ6PKI(t)
+	key := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{1, 2, 3}}))
+	pub := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PUBLIC KEY", Bytes: []byte{4, 5, 6}}))
+	tq6, err := ParseTQ6(bytes.NewReader(tq6Doc(certEl("usercert", key+pub+pemCert(p.Leaf)), "")))
+	if err != nil {
+		t.Fatalf("ParseTQ6: %v", err)
+	}
+	sameCerts(t, "Users", tq6.Users, []*x509.Certificate{p.Leaf})
+}
+
 // PEM_read_bio_X509 accepts the old "X509 CERTIFICATE" PEM label as well as
-// "CERTIFICATE" (openssl_cert.cpp:424).
+// "CERTIFICATE" (check_pem, OpenSSL master crypto/pem/pem_lib.c:128-200).
 func TestParseTQ6X509CertificateType(t *testing.T) {
 	p := newTQ6PKI(t)
 	old := string(pem.EncodeToMemory(&pem.Block{Type: "X509 CERTIFICATE", Bytes: p.Root.Raw}))
@@ -199,12 +213,17 @@ func TestParseTQ6Errors(t *testing.T) {
 		{"truncated root", tq6Doc(certEl("rootcert", truncated), "")},
 		{"truncated gzip", gzipBytes(t, tq6Doc(certEl("rootcert", pemCert(p.Root)), ""))[:40]},
 		{"bad config", tq6Doc("", `<tqslconfig majorversion="11" minorversion="35"></tqslconfig>`)},
-		// PEM_read_bio_X509 reads the first PEM block only and fails on it
-		// (openssl_cert.cpp:424); it does not move on to a later block.
-		{"corrupt first cert, valid second", tq6Doc(certEl("rootcert",
+		// PEM_read_bio_X509 (openssl_cert.cpp:424) fails on a block that is
+		// malformed as PEM and does not move on (OpenSSL master
+		// crypto/pem/pem_lib.c:239-259), and fails when the first certificate
+		// block's DER does not parse.
+		{"corrupt first cert block, valid second", tq6Doc(certEl("rootcert",
 			"-----BEGIN CERTIFICATE-----\n!!!! not base64 !!!!\n-----END CERTIFICATE-----\n"+pemCert(p.Root)), "")},
-		{"non-certificate first block", tq6Doc(certEl("rootcert",
-			string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte{1}}))+pemCert(p.Root)), "")},
+		{"BEGIN without END, valid second", tq6Doc(certEl("rootcert",
+			"-----BEGIN CERTIFICATE-----\nMIIB\n"+pemCert(p.Root)), "")},
+		{"first cert block bad DER, valid second", tq6Doc(certEl("rootcert", badDER+pemCert(p.Root)), "")},
+		{"only non-certificate blocks", tq6Doc(certEl("rootcert",
+			string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte{1}}))), "")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

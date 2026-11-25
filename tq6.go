@@ -151,39 +151,50 @@ func (t *TQ6) decodeCerts(d *xml.Decoder) error {
 	}
 }
 
-// firstPEMCert parses the first PEM block in s, which must be a certificate,
-// as PEM_read_bio_X509 reads it (openssl_cert.cpp:424). Text before the
-// first line starting with "-----BEGIN" is ignored. That block must decode
-// and be labelled CERTIFICATE or X509 CERTIFICATE; later blocks are never
-// tried.
+// firstPEMCert parses the first certificate PEM block in s, as
+// PEM_read_bio_X509 reads it (openssl_cert.cpp:424). OpenSSL reads PEM
+// blocks in turn and skips any whose label is not CERTIFICATE or
+// X509 CERTIFICATE (OpenSSL master crypto/pem/pem_lib.c:239-259, check_pem
+// at 128-200). Text outside blocks is ignored. A block that is malformed as
+// PEM ends the search with an error, as does a certificate block whose DER
+// does not parse.
 func firstPEMCert(s string) (*x509.Certificate, error) {
-	const begin = "-----BEGIN"
-	i := 0
-	for {
-		j := strings.Index(s[i:], begin)
-		if j < 0 {
+	for n := 1; ; n++ {
+		i := pemBeginLine(s)
+		if i < 0 {
 			return nil, errors.New("no PEM certificate")
 		}
-		i += j
-		if i == 0 || s[i-1] == '\n' {
-			break
+		s = s[i:]
+		// Cut at the next BEGIN line, so pem.Decode cannot skip a
+		// malformed block and return a later one.
+		block, rest := s, ""
+		if j := pemBeginLine(s[len(pemBegin):]); j >= 0 {
+			block, rest = s[:len(pemBegin)+j], s[len(pemBegin)+j:]
 		}
-		i += len(begin)
+		b, _ := pem.Decode([]byte(block))
+		if b == nil {
+			return nil, fmt.Errorf("PEM block %d is malformed", n)
+		}
+		if b.Type == "CERTIFICATE" || b.Type == "X509 CERTIFICATE" {
+			return x509.ParseCertificate(b.Bytes)
+		}
+		s = rest
 	}
-	// Cut at the next BEGIN line, so pem.Decode cannot skip a bad first
-	// block and return a later one.
-	block := s[i:]
-	if j := strings.Index(block[len(begin):], "\n"+begin); j >= 0 {
-		block = block[:len(begin)+j+1]
+}
+
+// pemBegin opens a PEM encapsulation boundary line.
+const pemBegin = "-----BEGIN"
+
+// pemBeginLine returns the index of the first "-----BEGIN" at the start of a
+// line in s, or -1.
+func pemBeginLine(s string) int {
+	if strings.HasPrefix(s, pemBegin) {
+		return 0
 	}
-	b, _ := pem.Decode([]byte(block))
-	if b == nil {
-		return nil, errors.New("first PEM block does not decode")
+	if j := strings.Index(s, "\n"+pemBegin); j >= 0 {
+		return j + 1
 	}
-	if b.Type != "CERTIFICATE" && b.Type != "X509 CERTIFICATE" {
-		return nil, fmt.Errorf("first PEM block is %q, not a certificate", b.Type)
-	}
-	return x509.ParseCertificate(b.Bytes)
+	return -1
 }
 
 // tq6Err wraps a read, XML or certificate error in ErrTQ6.
