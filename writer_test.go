@@ -590,6 +590,21 @@ func TestWriterInvalidInput(t *testing.T) {
 	})
 }
 
+func TestWriterSignDataErrorIsQSOError(t *testing.T) {
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	cfg.sigspec.Contact = append(cfg.sigspec.Contact, SpecField{Name: "UNKNOWN", Required: true})
+	var out bytes.Buffer
+	wr := NewWriter(&out, cfg, Ident{}, NormalizeOptions{})
+	err := wr.WriteQSO(newTestCredential(t), usStation(), writerQSO("W1AW", 1))
+	var qe *QSOError
+	if !errors.Is(err, ErrConfig) || !errors.As(err, &qe) || qe.Index != -1 {
+		t.Fatalf("WriteQSO = %v, want QSOError wrapping ErrConfig at index -1", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("wrote %d bytes on failure", out.Len())
+	}
+}
+
 func TestWriterNoIdentBeforeFirstQSO(t *testing.T) {
 	var buf bytes.Buffer
 	_ = newTestWriter(t, &buf)

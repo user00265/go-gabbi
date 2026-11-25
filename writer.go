@@ -274,7 +274,7 @@ func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 	// after the preamble records have been returned.
 	sd, err := SignData(wr.cfg, st, n)
 	if err != nil {
-		return p, err
+		return p, atIndex(-1, err)
 	}
 	sigName := signatureField(wr.cfg.Sigspec())
 	digest := sha1.Sum([]byte(sd))
