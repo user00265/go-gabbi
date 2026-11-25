@@ -1,0 +1,3 @@
+go test fuzz v1
+string("<!-- .UPL. accepted -->\n<!-- .UPLMESSAGE. File queued -->")
+string("file.tq8")

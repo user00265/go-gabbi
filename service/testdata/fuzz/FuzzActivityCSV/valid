@@ -1,0 +1,2 @@
+go test fuzz v1
+string("K1ABC,2024-02-03,04:05:06\n")
