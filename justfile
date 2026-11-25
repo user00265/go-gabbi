@@ -27,7 +27,7 @@ fuzz:
 
 # Generate golden fixtures with the pinned tqsl container.
 fixtures:
-    @echo "fixtures: not yet implemented (testing phase)"
+    @echo "Generate .tq5 fixtures: sh testdata/tq5/generate.sh EMPTY_OUTPUT_DIRECTORY"
 
 # Fail if the global gitignore hides any required path.
 doctor:

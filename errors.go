@@ -46,6 +46,9 @@ var (
 	// ErrInvalidStation means a station field is missing or invalid.
 	ErrInvalidStation = errors.New("gabbi: invalid station")
 
+	// ErrInvalidRequest means a certificate request has missing or invalid fields.
+	ErrInvalidRequest = errors.New("gabbi: invalid certificate request")
+
 	// ErrConfig means the TrustedQSL configuration could not be parsed or
 	// holds a structure this package cannot handle.
 	ErrConfig = errors.New("gabbi: invalid configuration")

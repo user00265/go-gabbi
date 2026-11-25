@@ -35,16 +35,17 @@ var errConfigTooLarge = errors.New("input exceeds 16 MiB")
 // [ParseConfig]. A Config is read-only after parsing and safe for concurrent
 // use.
 type Config struct {
-	major, minor int
-	sigspec      Sigspec
-	bands        []band // in TrustedQSL's sort order (location.cpp:175-195)
-	adifMap      map[string]string
-	modes        map[string]bool
-	propModes    map[string]bool
-	satellites   map[string]bool
-	entities     map[int]entity
-	fields       map[string]locField
-	locPages     []locPage // sorted by id
+	major, minor               int
+	sigspec                    Sigspec
+	bands                      []band // in TrustedQSL's sort order (location.cpp:175-195)
+	adifMap                    map[string]string
+	modes                      map[string]bool
+	propModes                  map[string]bool
+	satellites                 map[string]bool
+	entities                   map[int]entity
+	fields                     map[string]locField
+	locPages                   []locPage // sorted by id
+	providerName, providerUnit string
 }
 
 // Sigspec is the signature specification TrustedQSL signs with: the station
@@ -310,6 +311,12 @@ type (
 			Name string `xml:"name,attr"`
 		} `xml:"satellite"`
 	}
+	xmlProviders struct {
+		Providers []struct {
+			Name string `xml:"organizationName,attr"`
+			Unit string `xml:"organizationalUnitName"`
+		} `xml:"provider"`
+	}
 	xmlDXCC struct {
 		Entities []struct {
 			ArrlID  *string `xml:"arrlId,attr"`
@@ -366,6 +373,7 @@ type configSections struct {
 	dxcc       *xmlDXCC
 	locFields  *xmlLocFields
 	locPages   *xmlLocPages
+	providers  *xmlProviders
 }
 
 // decodeSection decodes the element start into *dst unless a section of that
@@ -431,6 +439,8 @@ func decodeConfig(d *xml.Decoder, start xml.StartElement) (*Config, error) {
 			err = decodeSection(d, el, &s.locFields)
 		case "locpages":
 			err = decodeSection(d, el, &s.locPages)
+		case "providers":
+			err = decodeSection(d, el, &s.providers)
 		default:
 			err = d.Skip()
 		}
@@ -488,6 +498,10 @@ func decodeConfig(d *xml.Decoder, start xml.StartElement) (*Config, error) {
 	}
 	if cfg.locPages, err = buildPages(s.locPages, cfg.fields); err != nil {
 		return nil, err
+	}
+	if s.providers != nil && len(s.providers.Providers) > 0 {
+		cfg.providerName = s.providers.Providers[0].Name
+		cfg.providerUnit = s.providers.Providers[0].Unit
 	}
 	return cfg, nil
 }
@@ -752,6 +766,15 @@ func (c *Config) Version() (major, minor int) {
 		return 0, 0
 	}
 	return c.major, c.minor
+}
+
+// Provider returns the first configured certificate provider's organization
+// and unit. A nil Config or missing provider returns two empty strings.
+func (c *Config) Provider() (name, unit string) {
+	if c == nil {
+		return "", ""
+	}
+	return c.providerName, c.providerUnit
 }
 
 // Sigspec returns the signature specification used for signing: the newest

@@ -1,0 +1,6 @@
+FROM docker.io/library/debian:sid-slim@sha256:01c15a9b50a3fed88d497ce199cbaabf5ef2d8ef227fe1f2142ddd1b07a32eae
+RUN rm -f /etc/apt/sources.list /etc/apt/sources.list.d/* \
+ && printf '%s\n' 'deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261124T000000Z/ sid main' 'deb-src [check-valid-until=no] http://snapshot.debian.org/archive/debian/20261124T000000Z/ sid main' > /etc/apt/sources.list.d/snapshot.list \
+ && apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 update -qq \
+ && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=30 install -y --no-install-recommends trustedqsl=2.8.7-1 g++ libc6-dev dpkg-dev openssl ca-certificates \
+ && mkdir /reference && cd /reference && apt-get source trustedqsl=2.8.7-1
