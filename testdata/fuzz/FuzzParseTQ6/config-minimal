@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<tqsldata>\n<tqslcerts>\n</tqslcerts>\n<tqslconfig majorversion=\"11\" minorversion=\"34\"></tqslconfig></tqsldata>\n")

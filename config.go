@@ -172,6 +172,9 @@ func ParseConfig(r io.Reader) (*Config, error) {
 // decompressed bytes. Callers read it to EOF, which also verifies the gzip
 // checksum, so the gzip reader needs no Close.
 func openTQSLData(r io.Reader) (io.Reader, error) {
+	if r == nil {
+		return nil, errors.New("nil reader")
+	}
 	br := bufio.NewReader(r)
 	var src io.Reader = br
 	magic, err := br.Peek(2)

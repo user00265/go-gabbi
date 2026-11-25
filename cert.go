@@ -188,12 +188,9 @@ func checkCredential(c *Certificate, s crypto.Signer) error {
 	if c == nil || c.X509 == nil {
 		return fmt.Errorf("%w: nil certificate", ErrNoCertificate)
 	}
-	if err := checkSignerNil(s); err != nil {
+	pub, err := signerRSAPublic(s)
+	if err != nil {
 		return err
-	}
-	pub, ok := s.Public().(*rsa.PublicKey)
-	if !ok || pub == nil || pub.N == nil {
-		return fmt.Errorf("%w: %T is not an RSA public key", ErrUnsupportedKey, s.Public())
 	}
 	if bits := pub.N.BitLen(); bits > maxKeyBits {
 		return fmt.Errorf("%w: RSA key is %d bits, TrustedQSL signs with at most %d",
@@ -212,6 +209,20 @@ func checkSignerNil(s crypto.Signer) error {
 		return fmt.Errorf("%w: nil signer", ErrNoKey)
 	}
 	return nil
+}
+
+// signerRSAPublic returns the signer's RSA public key. A nil signer gives
+// ErrNoKey; a key that is not RSA, or has no modulus, gives
+// ErrUnsupportedKey, so comparing the result with Equal cannot panic.
+func signerRSAPublic(s crypto.Signer) (*rsa.PublicKey, error) {
+	if err := checkSignerNil(s); err != nil {
+		return nil, err
+	}
+	pub, ok := s.Public().(*rsa.PublicKey)
+	if !ok || pub == nil || pub.N == nil {
+		return nil, fmt.Errorf("%w: %T is not an RSA public key", ErrUnsupportedKey, s.Public())
+	}
+	return pub, nil
 }
 
 // LoadPKCS12 reads a .p12 file exported by TrustedQSL and returns the

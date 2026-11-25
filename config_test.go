@@ -693,6 +693,12 @@ func TestParseConfigReadError(t *testing.T) {
 	}
 }
 
+func TestParseConfigNilReader(t *testing.T) {
+	if _, err := ParseConfig(nil); !errors.Is(err, ErrConfig) {
+		t.Errorf("err = %v, want ErrConfig", err)
+	}
+}
+
 func FuzzParseConfig(f *testing.F) {
 	// Seeds live in testdata/fuzz/FuzzParseConfig.
 	f.Fuzz(func(t *testing.T, data []byte) {

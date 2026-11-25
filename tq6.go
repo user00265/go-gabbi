@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
@@ -150,20 +151,39 @@ func (t *TQ6) decodeCerts(d *xml.Decoder) error {
 	}
 }
 
-// firstPEMCert parses the first CERTIFICATE block in s, skipping any text and
-// other blocks before it, as PEM_read_bio_X509 does (openssl_cert.cpp:424).
+// firstPEMCert parses the first PEM block in s, which must be a certificate,
+// as PEM_read_bio_X509 reads it (openssl_cert.cpp:424). Text before the
+// first line starting with "-----BEGIN" is ignored. That block must decode
+// and be labelled CERTIFICATE or X509 CERTIFICATE; later blocks are never
+// tried.
 func firstPEMCert(s string) (*x509.Certificate, error) {
-	rest := []byte(s)
+	const begin = "-----BEGIN"
+	i := 0
 	for {
-		var b *pem.Block
-		b, rest = pem.Decode(rest)
-		if b == nil {
+		j := strings.Index(s[i:], begin)
+		if j < 0 {
 			return nil, errors.New("no PEM certificate")
 		}
-		if b.Type == "CERTIFICATE" {
-			return x509.ParseCertificate(b.Bytes)
+		i += j
+		if i == 0 || s[i-1] == '\n' {
+			break
 		}
+		i += len(begin)
 	}
+	// Cut at the next BEGIN line, so pem.Decode cannot skip a bad first
+	// block and return a later one.
+	block := s[i:]
+	if j := strings.Index(block[len(begin):], "\n"+begin); j >= 0 {
+		block = block[:len(begin)+j+1]
+	}
+	b, _ := pem.Decode([]byte(block))
+	if b == nil {
+		return nil, errors.New("first PEM block does not decode")
+	}
+	if b.Type != "CERTIFICATE" && b.Type != "X509 CERTIFICATE" {
+		return nil, fmt.Errorf("first PEM block is %q, not a certificate", b.Type)
+	}
+	return x509.ParseCertificate(b.Bytes)
 }
 
 // tq6Err wraps a read, XML or certificate error in ErrTQ6.
@@ -179,21 +199,19 @@ func tq6Err(err error) error {
 // pending key the same way, on the public key alone
 // (tqsl_find_matching_key, openssl_cert.cpp:5162). Nil entries are skipped.
 //
-// A nil key gives an error wrapping [ErrNoKey], and a key that matches none
-// of users gives [ErrCertMismatch]. The matching certificate then goes
+// A nil key gives an error wrapping [ErrNoKey], a key that is not RSA gives
+// [ErrUnsupportedKey], and a key that matches none of users gives
+// [ErrCertMismatch]. The matching certificate then goes
 // through [ParseCertificate] and [NewCredential], so a certificate with no
 // callsign gives [ErrNoCertificate] and a key TrustedQSL cannot sign with
 // gives [ErrUnsupportedKey].
 func Pair(users []*x509.Certificate, key crypto.Signer) (Credential, error) {
-	if err := checkSignerNil(key); err != nil {
+	pub, err := signerRSAPublic(key)
+	if err != nil {
 		return Credential{}, err
 	}
-	pub := key.Public()
 	for _, u := range users {
-		if u == nil {
-			continue
-		}
-		if k, ok := u.PublicKey.(interface{ Equal(crypto.PublicKey) bool }); !ok || !k.Equal(pub) {
+		if u == nil || !pub.Equal(u.PublicKey) {
 			continue
 		}
 		cert, err := ParseCertificate(u)
@@ -226,6 +244,11 @@ func ExportPKCS12(c Credential, chain []*x509.Certificate, password string) ([]b
 	key, ok := c.Signer.(*rsa.PrivateKey)
 	if !ok {
 		return nil, fmt.Errorf("%w: %T is not an exportable *rsa.PrivateKey", ErrUnsupportedKey, c.Signer)
+	}
+	// checkCredential only looks at the public half, so a key without its
+	// private part gets this far.
+	if err := key.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnsupportedKey, err)
 	}
 	for i, ca := range chain {
 		if ca == nil {

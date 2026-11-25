@@ -115,6 +115,33 @@ func TestParseTQ6LeadingText(t *testing.T) {
 	sameCerts(t, "Roots", tq6.Roots, []*x509.Certificate{p.Root})
 }
 
+// PEM_read_bio_X509 accepts the old "X509 CERTIFICATE" PEM label as well as
+// "CERTIFICATE" (openssl_cert.cpp:424).
+func TestParseTQ6X509CertificateType(t *testing.T) {
+	p := newTQ6PKI(t)
+	old := string(pem.EncodeToMemory(&pem.Block{Type: "X509 CERTIFICATE", Bytes: p.Root.Raw}))
+	tq6, err := ParseTQ6(bytes.NewReader(tq6Doc(certEl("rootcert", old), "")))
+	if err != nil {
+		t.Fatalf("ParseTQ6: %v", err)
+	}
+	sameCerts(t, "Roots", tq6.Roots, []*x509.Certificate{p.Root})
+}
+
+// testdata/config-11.34.tq6 is config.tq6 as LoTW served it: a <tqsldata>
+// wrapper holding only a <tqslconfig> (location.cpp:4344).
+func TestParseTQ6RealLoTWConfig(t *testing.T) {
+	tq6, err := ParseTQ6(bytes.NewReader(readTestdata(t, "config-11.34.tq6")))
+	if err != nil {
+		t.Fatalf("ParseTQ6: %v", err)
+	}
+	if major, minor := tq6.Config.Version(); major != 11 || minor != 34 {
+		t.Errorf("Config.Version() = %d.%d, want 11.34", major, minor)
+	}
+	if len(tq6.Roots)+len(tq6.CAs)+len(tq6.Users) != 0 {
+		t.Errorf("Roots = %d, CAs = %d, Users = %d, want none", len(tq6.Roots), len(tq6.CAs), len(tq6.Users))
+	}
+}
+
 // An optional <tqslconfig> child of <tqsldata> is the configuration
 // (location.cpp:4344). It goes through the same decoder as ParseConfig,
 // so the minimum version applies.
@@ -172,6 +199,12 @@ func TestParseTQ6Errors(t *testing.T) {
 		{"truncated root", tq6Doc(certEl("rootcert", truncated), "")},
 		{"truncated gzip", gzipBytes(t, tq6Doc(certEl("rootcert", pemCert(p.Root)), ""))[:40]},
 		{"bad config", tq6Doc("", `<tqslconfig majorversion="11" minorversion="35"></tqslconfig>`)},
+		// PEM_read_bio_X509 reads the first PEM block only and fails on it
+		// (openssl_cert.cpp:424); it does not move on to a later block.
+		{"corrupt first cert, valid second", tq6Doc(certEl("rootcert",
+			"-----BEGIN CERTIFICATE-----\n!!!! not base64 !!!!\n-----END CERTIFICATE-----\n"+pemCert(p.Root)), "")},
+		{"non-certificate first block", tq6Doc(certEl("rootcert",
+			string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte{1}}))+pemCert(p.Root)), "")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -200,6 +233,12 @@ func TestParseTQ6Errors(t *testing.T) {
 				t.Errorf("err = %v, want the 16 MiB cap error", err)
 			}
 		})
+	}
+}
+
+func TestParseTQ6NilReader(t *testing.T) {
+	if _, err := ParseTQ6(nil); !errors.Is(err, ErrTQ6) {
+		t.Errorf("err = %v, want ErrTQ6", err)
 	}
 }
 
@@ -269,6 +308,12 @@ func TestPair(t *testing.T) {
 		// A typed nil *rsa.PrivateKey panics in Public().
 		if _, err := Pair(users, (*rsa.PrivateKey)(nil)); !errors.Is(err, ErrNoKey) {
 			t.Errorf("typed nil: err = %v, want ErrNoKey", err)
+		}
+	})
+	t.Run("zero rsa key", func(t *testing.T) {
+		// Its Public() has a nil N, which rsa.PublicKey.Equal dereferences.
+		if _, err := Pair(users, &rsa.PrivateKey{}); !errors.Is(err, ErrUnsupportedKey) {
+			t.Errorf("err = %v, want ErrUnsupportedKey", err)
 		}
 	})
 	t.Run("RSA-2048", func(t *testing.T) {
@@ -369,6 +414,10 @@ func TestExportPKCS12KeyTypes(t *testing.T) {
 		{"nil X509", Credential{Cert: &Certificate{}, Signer: cred.Signer}, ErrNoCertificate},
 		{"nil signer", Credential{Cert: cred.Cert}, ErrNoKey},
 		{"typed nil signer", Credential{Cert: cred.Cert, Signer: (*rsa.PrivateKey)(nil)}, ErrNoKey},
+		// The public half matches the certificate, but there is no private
+		// key to marshal.
+		{"public-only rsa key", Credential{Cert: cred.Cert,
+			Signer: &rsa.PrivateKey{PublicKey: cred.Signer.(*rsa.PrivateKey).PublicKey}}, ErrUnsupportedKey},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -389,13 +438,8 @@ func TestExportPKCS12KeyTypes(t *testing.T) {
 }
 
 func FuzzParseTQ6(f *testing.F) {
+	// Seeds live in testdata/fuzz/FuzzParseTQ6. The key only feeds Pair.
 	p := newTQ6PKI(f)
-	doc := tq6Doc(certEl("rootcert", pemCert(p.Root))+certEl("cacert", pemCert(p.Inter))+
-		certEl("usercert", pemCert(p.Leaf)), "")
-	f.Add(doc)
-	f.Add(gzipBytes(f, doc))
-	f.Add(tq6Doc("", `<tqslconfig majorversion="11" minorversion="34"></tqslconfig>`))
-	f.Add([]byte("<tqsldata/>"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		tq6, err := ParseTQ6(bytes.NewReader(data))
 		if err != nil {
