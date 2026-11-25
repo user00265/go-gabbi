@@ -41,13 +41,19 @@ storing it is your application's job:
 
 ## Usage
 
-A short sketch with error handling left out. The runnable examples in the
-package documentation (`ExampleSign_all` and others) show it in full. The
+A short sketch; the caller owns the duplicate-store transaction. The runnable
+examples in the package documentation (`ExampleSign_all` and others) show more. The
 API is still settling:
 
 ```go
 cfg, err := gabbi.ParseConfig(bytes.NewReader(storedConfig))
+if err != nil {
+	return err
+}
 cred, _, err := gabbi.LoadPKCS12(p12Bytes, "")
+if err != nil {
+	return err
+}
 creds := []gabbi.Credential{cred}
 
 st := gabbi.Station{
@@ -66,6 +72,8 @@ if err == nil {
 	err = zw.Close()
 }
 // Commit the store's transaction only if report.Commit is true.
+_ = report.Commit
+return err
 ```
 
 Check every error in real code. Errors wrap sentinels such as
