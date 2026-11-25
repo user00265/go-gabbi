@@ -17,9 +17,9 @@ import (
 	"time"
 )
 
-// Line numbers in comments refer to TrustedQSL at HEAD 9b30153 (excerpts in
-// .superpowers/sdd/2026-11-24-signing-path-plan/tqsl-excerpts-task6.txt):
-// src/tqslconvert.cpp, src/openssl_cert.cpp and apps/tqsl.cpp.
+// Line numbers in comments refer to TrustedQSL at commit 9b30153 (2.8.8):
+// https://sourceforge.net/p/trustedqsl/tqsl/ci/9b301538a7b8b2766917ef23d344840686138e1f/tree/
+// Files cited: src/tqslconvert.cpp, src/openssl_cert.cpp and apps/tqsl.cpp.
 
 // mapStore is an in-memory DupeStore that logs every call.
 type mapStore struct {
