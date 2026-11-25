@@ -21,8 +21,8 @@ const (
 	Compliant Action = iota
 	// Abort stops at the first bad or duplicate QSO, like tqsl -a abort.
 	Abort
-	// All signs every QSO, duplicates included, like tqsl -a all. It takes
-	// two passes when the log holds duplicates; see [Sign].
+	// All skips bad and out-of-range QSOs and permits duplicates, like
+	// tqsl -a all. Duplicates require a second pass; see [Sign].
 	All
 )
 
@@ -64,9 +64,9 @@ type SignOptions struct {
 	Ident Ident
 	// Normalize is passed to [Config.NormalizeQSO] for every QSO.
 	Normalize NormalizeOptions
-	// Restart marks the second pass after [ErrRestart]. It signs every QSO
-	// without touching the store, writes "AllowDupes: true" in the ident
-	// and skips bad QSOs whatever the Action.
+	// Restart marks the second pass after [ErrRestart]. It signs eligible QSOs
+	// without touching the store, writes "AllowDupes: true" in the ident,
+	// and skips bad and out-of-range QSOs whatever the Action.
 	Restart bool
 }
 
