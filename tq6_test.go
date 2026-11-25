@@ -115,6 +115,27 @@ func TestParseTQ6LeadingText(t *testing.T) {
 	sameCerts(t, "Roots", tq6.Roots, []*x509.Certificate{p.Root})
 }
 
+// OpenSSL 3.6.5 reads a certificate after a line starting -----BEGINNING.
+func TestParseTQ6IgnoresBeginPrefixInNotes(t *testing.T) {
+	p := newTQ6PKI(t)
+	key := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte{1, 2, 3}}))
+	for _, tt := range []struct {
+		name string
+		text string
+	}{
+		{"before certificate", "-----BEGINNING notes\n" + pemCert(p.Root)},
+		{"between blocks", key + "-----BEGINNING notes\n" + pemCert(p.Root)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tq6, err := ParseTQ6(bytes.NewReader(tq6Doc(certEl("rootcert", tt.text), "")))
+			if err != nil {
+				t.Fatalf("ParseTQ6: %v", err)
+			}
+			sameCerts(t, "Roots", tq6.Roots, []*x509.Certificate{p.Root})
+		})
+	}
+}
+
 // PEM_read_bio_X509 (openssl_cert.cpp:424) skips PEM blocks whose label is
 // not a certificate label and reads on (OpenSSL master
 // crypto/pem/pem_lib.c:239-259, check_pem at 128-200).

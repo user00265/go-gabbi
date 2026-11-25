@@ -183,9 +183,9 @@ func firstPEMCert(s string) (*x509.Certificate, error) {
 }
 
 // pemBegin opens a PEM encapsulation boundary line.
-const pemBegin = "-----BEGIN"
+const pemBegin = "-----BEGIN "
 
-// pemBeginLine returns the index of the first "-----BEGIN" at the start of a
+// pemBeginLine returns the index of the first "-----BEGIN " at the start of a
 // line in s, or -1.
 func pemBeginLine(s string) int {
 	if strings.HasPrefix(s, pemBegin) {
