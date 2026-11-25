@@ -1,9 +1,10 @@
 // Package gabbi signs QSO records into the GAbbI format that TrustedQSL
 // writes into .tq8 files, for upload to ARRL's Logbook of the World.
 //
-// The package loads a TrustedQSL .p12 callsign certificate, normalizes typed
-// QSO values against the TrustedQSL configuration, and writes signed GAbbI
-// records. A .tq8 file is that text, gzipped.
+// The package loads callsign certificates, builds certificate requests,
+// normalizes typed QSO values against the TrustedQSL configuration, and
+// writes signed GAbbI records. A .tq8 file is that text, gzipped. The service
+// subpackage provides optional network operations.
 //
 // # Boundaries
 //
@@ -27,7 +28,7 @@
 //
 // # Certificate renewal
 //
-// Certificate request support is not written yet. When it is, its
-// documentation will warn that requesting a renewal immediately invalidates
-// the existing certificate.
+// [BuildRequest] can build a renewal without submitting it. Requesting a
+// renewal before the existing certificate expires immediately invalidates it;
+// callers can show [RenewalWarning] before submitting the request.
 package gabbi
