@@ -185,17 +185,18 @@ func TestParseCertificateDXCC(t *testing.T) {
 func TestParseCertificateMalformed(t *testing.T) {
 	p := newTestPKI(t)
 	tests := []struct {
-		name string
-		mod  func(*testCertFields)
-		oid  string
+		name          string
+		mod           func(*testCertFields)
+		oid           string
+		wantDateError bool
 	}{
-		{"bad not-before", func(f *testCertFields) { f.QSONotBefore = "2020-02-30" }, "1.3.6.1.4.1.12348.1.2"},
-		{"bad not-after", func(f *testCertFields) { f.QSONotAfter = "garbage" }, "1.3.6.1.4.1.12348.1.3"},
-		{"bad dxcc", func(f *testCertFields) { f.DXCC = "abc" }, "1.3.6.1.4.1.12348.1.4"},
-		{"supersedes without ;", func(f *testCertFields) { f.Supersedes = "/CN=x" }, "1.3.6.1.4.1.12348.1.5"},
-		{"supersedes bad serial", func(f *testCertFields) { f.Supersedes = "/CN=x;12a" }, "1.3.6.1.4.1.12348.1.5"},
-		{"supersedes empty serial", func(f *testCertFields) { f.Supersedes = "/CN=x;" }, "1.3.6.1.4.1.12348.1.5"},
-		{"supersedes signed serial", func(f *testCertFields) { f.Supersedes = "/CN=x;-5" }, "1.3.6.1.4.1.12348.1.5"},
+		{"bad not-before", func(f *testCertFields) { f.QSONotBefore = "2020-02-30" }, "1.3.6.1.4.1.12348.1.2", true},
+		{"bad not-after", func(f *testCertFields) { f.QSONotAfter = "garbage" }, "1.3.6.1.4.1.12348.1.3", true},
+		{"bad dxcc", func(f *testCertFields) { f.DXCC = "abc" }, "1.3.6.1.4.1.12348.1.4", false},
+		{"supersedes without ;", func(f *testCertFields) { f.Supersedes = "/CN=x" }, "1.3.6.1.4.1.12348.1.5", false},
+		{"supersedes bad serial", func(f *testCertFields) { f.Supersedes = "/CN=x;12a" }, "1.3.6.1.4.1.12348.1.5", false},
+		{"supersedes empty serial", func(f *testCertFields) { f.Supersedes = "/CN=x;" }, "1.3.6.1.4.1.12348.1.5", false},
+		{"supersedes signed serial", func(f *testCertFields) { f.Supersedes = "/CN=x;-5" }, "1.3.6.1.4.1.12348.1.5", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -208,7 +209,7 @@ func TestParseCertificateMalformed(t *testing.T) {
 			if !strings.Contains(err.Error(), tt.oid) {
 				t.Errorf("err = %q, want it to name %s", err, tt.oid)
 			}
-			if tt.name == "bad not-before" && !errors.Is(err, ErrInvalidDate) {
+			if tt.wantDateError && !errors.Is(err, ErrInvalidDate) {
 				t.Errorf("err = %v, want it to wrap ErrInvalidDate too", err)
 			}
 		})

@@ -21,6 +21,25 @@ func baseQSO() QSO {
 	}
 }
 
+func TestNormalizeQSORejectsNUL(t *testing.T) {
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	for _, tc := range []struct {
+		name string
+		set  func(*QSO)
+	}{
+		{"CALL", func(q *QSO) { q.Call = "W1AW\x00X" }},
+		{"FREQ", func(q *QSO) { q.Freq = "14.0\x00" }},
+		{"SAT_NAME", func(q *QSO) { q.SatName = "AO-7\x00" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := baseQSO()
+			tc.set(&q)
+			_, err := cfg.NormalizeQSO(q, NormalizeOptions{SkipCallCheck: true})
+			wantQSOError(t, err, tc.name, "")
+		})
+	}
+}
+
 // wantQSOError checks that err is a *QSOError for field with Index -1,
 // wrapping ErrInvalidQSO, and, when detail is not empty, with that Detail.
 func wantQSOError(t *testing.T, err error, field, detail string) {

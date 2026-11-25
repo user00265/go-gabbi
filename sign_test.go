@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -709,6 +710,28 @@ func TestSignCompliantNothingSigned(t *testing.T) {
 	}
 }
 
+func TestSignCallerRollbackRestoresLegacyKey(t *testing.T) {
+	cred := newTestCredential(t)
+	legacy := testLegacyKey(cred)
+	committed := map[string]string{legacy: "old station"}
+	transaction := newMapStore()
+	transaction.m = maps.Clone(committed)
+	_, report, err := runSign(t, []Credential{cred}, usStation(), []QSO{writerQSO("W1AW", 1)},
+		SignOptions{Action: Compliant, Dupes: transaction})
+	if !errors.Is(err, ErrNoQSOs) || report.Commit {
+		t.Fatalf("Sign = %v, Commit = %t", err, report.Commit)
+	}
+	if _, exists := transaction.m[legacy]; exists {
+		t.Fatal("legacy key was not migrated in transaction")
+	}
+	if report.Commit {
+		committed = maps.Clone(transaction.m)
+	}
+	if !maps.Equal(committed, map[string]string{legacy: "old station"}) {
+		t.Fatalf("rollback did not retain original store: %v", committed)
+	}
+}
+
 func TestSignAbort(t *testing.T) {
 	// The first error or duplicate stops the run (apps/tqsl.cpp:2487-2490)
 	// and the store is rolled back (2566-2571, 2598-2614).
@@ -972,6 +995,7 @@ func TestSignNilArguments(t *testing.T) {
 func TestSignBadCredential(t *testing.T) {
 	good := newTestCredential(t)
 	rsa2048 := newTestKeyBits(t, 2048)
+	other := newTestKeyBits(t, 1024)
 	for _, tt := range []struct {
 		name  string
 		creds []Credential
@@ -979,6 +1003,7 @@ func TestSignBadCredential(t *testing.T) {
 	}{
 		{"nil signer", []Credential{{Cert: good.Cert}}, ErrNoKey},
 		{"rsa 2048", []Credential{{Cert: good.Cert, Signer: rsa2048}}, ErrUnsupportedKey},
+		{"mismatched key", []Credential{{Cert: good.Cert, Signer: other}}, ErrCertMismatch},
 		{"nil cert", []Credential{{Signer: good.Signer}}, ErrNoCertificate},
 		{"empty credential", []Credential{{}}, ErrNoCertificate},
 		{"empty creds", nil, ErrNoCertificate},

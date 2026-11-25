@@ -96,6 +96,9 @@ type QSOError struct {
 
 // Error returns the message, including the QSO index and field name.
 func (e *QSOError) Error() string {
+	if e == nil {
+		return "gabbi: nil QSO error"
+	}
 	msg := fmt.Sprintf("gabbi: QSO %d: %s: %v", e.Index, e.Field, e.Err)
 	if e.Detail != "" {
 		msg += ": " + e.Detail
@@ -105,5 +108,8 @@ func (e *QSOError) Error() string {
 
 // Unwrap returns the underlying error.
 func (e *QSOError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
 	return e.Err
 }

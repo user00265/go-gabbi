@@ -118,6 +118,9 @@ func FuzzParseDate(f *testing.F) {
 	f.Fuzz(func(t *testing.T, s string) {
 		d, err := ParseDate(s)
 		if err != nil {
+			if !errors.Is(err, ErrInvalidDate) {
+				t.Fatalf("ParseDate(%q): %v, want ErrInvalidDate", s, err)
+			}
 			return
 		}
 		if d.Year < 1 || d.Year > 9999 || d.Month < 1 || d.Month > 12 || d.Day < 1 || d.Day > 31 {

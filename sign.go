@@ -148,7 +148,8 @@ type Report struct {
 //
 // Then, for each QSO, in order:
 //
-//  1. The required fields are checked (tqslconvert.cpp:1343-1371).
+//  1. ADIF field lengths and required fields are checked
+//     (tqslconvert.cpp:268-285, 1343-1371).
 //  2. The date filter From and To is applied (tqslconvert.cpp:1374-1388). A
 //     QSO outside it is OutOfRange.
 //  3. The values are checked and normalized with [Config.NormalizeQSO]

@@ -18,10 +18,13 @@ test:
 fuzz:
     #!/usr/bin/env bash
     set -euo pipefail
-    for pkg in $(go list ./...); do
-        for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
-            echo "== $pkg $target"
-            go test -run '^$' -fuzz "^${target}\$" -fuzztime=30s -fuzzminimizetime=1s "$pkg"
+    packages=$(go list ./...)
+    for pkg in $packages; do
+        targets=$(go test -list '^Fuzz' "$pkg")
+        for target in $targets; do
+            case "$target" in
+                Fuzz*) echo "== $pkg $target"; go test -run '^$' -fuzz "^${target}\$" -fuzztime=30s -fuzzminimizetime=1s "$pkg" ;;
+            esac
         done
     done
 
@@ -33,7 +36,7 @@ fixtures:
 doctor:
     #!/usr/bin/env bash
     set -uo pipefail
-    paths="go.mod justfile .golangci.yml .gitignore README.md LICENSE NOTICE doc.go testdata internal .github"
+    paths="go.mod justfile .golangci.yml .gitignore README.md LICENSE NOTICE doc.go testdata/ internal/ .github/"
     git check-ignore -v --no-index $paths
     status=$?
     case $status in

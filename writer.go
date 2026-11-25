@@ -228,11 +228,15 @@ func (wr *Writer) prepare(c Credential, st Station, q QSO) (pending, error) {
 	if err := checkCert(cert, st, n); err != nil {
 		return pending{}, err
 	}
+	details, err := StationDetails(wr.cfg, st)
+	if err != nil {
+		return pending{}, err
+	}
 
 	p := pending{
 		QSO:            n,
 		Cert:           cert,
-		StationDetails: StationDetails(wr.cfg, st),
+		StationDetails: details,
 		valid:          true,
 		gen:            wr.gen,
 		certKey:        string(cert.X509.Raw),

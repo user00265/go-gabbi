@@ -67,6 +67,8 @@ type Superseded struct {
 // is how TrustedQSL reads them (openssl_cert.cpp:5414-5466). Each is
 // optional, but a value that is present and malformed gives an error
 // wrapping [ErrNoCertificate] that names the OID.
+// DXCC extension values must be non-negative decimal integers; this is
+// stricter than TrustedQSL's C integer parsing.
 func ParseCertificate(c *x509.Certificate) (*Certificate, error) {
 	if c == nil {
 		return nil, fmt.Errorf("%w: nil certificate", ErrNoCertificate)

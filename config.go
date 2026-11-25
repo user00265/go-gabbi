@@ -867,7 +867,7 @@ func (c *Config) locField(id string) (locField, bool) {
 }
 
 // pages returns the location pages sorted by Id. Callers must not modify
-// the result.
+// the slice or the nested page fields.
 func (c *Config) pages() []locPage { return c.locPages }
 
 // dxcc returns the DXCC entity with the given ARRL id.

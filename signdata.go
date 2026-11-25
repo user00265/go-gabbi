@@ -163,14 +163,15 @@ func QSODetails(cfg *Config, q QSO) string {
 // sigspec, in sigspec order, joined by ", " (location.cpp:880-883). Values
 // keep their case. The result is cut to 127 bytes, as TrustedQSL copies it
 // into a 128-byte buffer (tqslconvert.cpp:1825-1828); the cut may fall
-// inside a multi-byte character. An invalid station or a nil cfg gives "".
-func StationDetails(cfg *Config, st Station) string {
+// inside a multi-byte character. An invalid station returns an error wrapping
+// [ErrInvalidStation]; a nil cfg returns an error wrapping [ErrConfig].
+func StationDetails(cfg *Config, st Station) (string, error) {
 	if cfg == nil {
-		return ""
+		return "", fmt.Errorf("%w: nil Config", ErrConfig)
 	}
 	values, err := stationValues(cfg, st)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	var parts []string
 	for _, f := range cfg.Sigspec().Station {
@@ -178,7 +179,7 @@ func StationDetails(cfg *Config, st Station) string {
 			parts = append(parts, f.Name+": "+v)
 		}
 	}
-	return truncate(strings.Join(parts, ", "), detailsMax)
+	return truncate(strings.Join(parts, ", "), detailsMax), nil
 }
 
 // DupeKey returns TrustedQSL's duplicate key for q: the certificate

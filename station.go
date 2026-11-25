@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // Station is a station location: the values TrustedQSL stores for one entry
@@ -120,6 +121,9 @@ func stationErr(field, format string, args ...any) error {
 //     case. TrustedQSL's tqsl_setLocationField also accepts a fuzzy match on
 //     the label (location.cpp:4154-4161), such as "Texas" for "TX"; this
 //     package rejects those.
+//   - NUL bytes in station text are rejected to avoid C string truncation.
+//   - List and numeric values are matched without trimming surrounding
+//     whitespace. Text fields are trimmed when the station is written.
 //
 // ValidateStation does not change st. The canonical forms (the configured
 // spelling of list values, uppercased callsign and IOTA) are applied when
@@ -165,6 +169,24 @@ func itoaNonZero(n int) string {
 // the station part of the sign data. When st is invalid it returns the error
 // ValidateStation returns.
 func (c *Config) stationFields(st Station) ([]stationField, error) {
+	for _, value := range []struct{ field, text string }{
+		{"CALL", st.Call}, {"GRIDSQUARE", st.GridSquare}, {"IOTA", st.IOTA},
+	} {
+		if strings.ContainsRune(value.text, 0) {
+			return nil, stationErr(value.field, "field contains NUL byte")
+		}
+	}
+	keys := make([]string, 0, len(st.Fields))
+	for field := range st.Fields {
+		keys = append(keys, field)
+	}
+	slices.Sort(keys)
+	for _, field := range keys {
+		value := st.Fields[field]
+		if strings.ContainsRune(field, 0) || strings.ContainsRune(value, 0) {
+			return nil, stationErr(field, "field contains NUL byte")
+		}
+	}
 	if st.Call == "" {
 		return nil, stationErr("CALL", "callsign is required")
 	}
@@ -229,11 +251,6 @@ func (c *Config) stationFields(st Station) ([]stationField, error) {
 			return nil, stationErr(id, "not a location field for DXCC %d", st.DXCC)
 		}
 	}
-	keys := make([]string, 0, len(st.Fields))
-	for k := range st.Fields {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
 	for _, k := range keys {
 		f, ok := c.locField(k)
 		if !ok || !onPages[k] || f.intype == intypeBadZone {

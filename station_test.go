@@ -27,6 +27,27 @@ func usStation() Station {
 	}
 }
 
+func TestValidateStationRejectsNUL(t *testing.T) {
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	for _, tc := range []struct {
+		name string
+		set  func(*Station)
+	}{
+		{"GRIDSQUARE", func(s *Station) { s.GridSquare = "EM10\x00dh" }},
+		{"IOTA", func(s *Station) { s.IOTA = "NA-001\x00" }},
+		{"US_COUNTY", func(s *Station) { s.Fields["US_COUNTY"] = "Travis\x00" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := usStation()
+			tc.set(&st)
+			err := cfg.ValidateStation(st)
+			if !errors.Is(err, ErrInvalidStation) || !strings.Contains(err.Error(), tc.name) {
+				t.Fatalf("ValidateStation: %v, want invalid field %s", err, tc.name)
+			}
+		})
+	}
+}
+
 func fieldNames(fs []stationField) []string {
 	out := make([]string, len(fs))
 	for i, f := range fs {

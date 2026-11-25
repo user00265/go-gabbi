@@ -77,6 +77,7 @@ type NormalizeOptions struct {
 //     would read those differently from the text that gets signed, so
 //     they give an error here (Detail "Invalid FREQ (...): not an ADIF
 //     Number") instead of a signature over a frequency nobody meant.
+//   - NUL bytes in text fields are rejected, avoiding C string truncation.
 //
 // Errors are a [*QSOError] with Index -1 that wraps [ErrInvalidQSO]. Its
 // Field is the GAbbI field name and its Detail is TrustedQSL's message.
@@ -188,6 +189,9 @@ func precheckQSO(q QSO) error {
 		{"FREQ", q.Freq}, {"FREQ_RX", q.FreqRX}, {"BAND_RX", q.BandRX},
 		{"SAT_NAME", q.SatName}, {"PROP_MODE", q.PropMode},
 	} {
+		if strings.ContainsRune(f.value, 0) {
+			return qsoErr(f.name, "field contains NUL byte")
+		}
 		if len(f.value) > adifMaxLen(f.name) {
 			return qsoErr(f.name, "ADIF field "+f.name+" data length overflow")
 		}

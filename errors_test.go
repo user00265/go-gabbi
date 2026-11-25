@@ -7,6 +7,16 @@ import (
 	"testing"
 )
 
+func TestNilQSOError(t *testing.T) {
+	var err *QSOError
+	if got := err.Error(); got == "" {
+		t.Fatal("nil QSOError returned an empty message")
+	}
+	if got := err.Unwrap(); got != nil {
+		t.Fatalf("nil QSOError unwrapped to %v", got)
+	}
+}
+
 func TestQSOErrorIs(t *testing.T) {
 	e := &QSOError{Index: 3, Field: "BAND", Err: ErrInvalidQSO}
 	if !errors.Is(e, ErrInvalidQSO) {

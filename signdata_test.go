@@ -231,8 +231,8 @@ func TestStationDetails(t *testing.T) {
 	// "NAME: value" joined by ", " in tSTATION order, value not uppercased
 	// (location.cpp:880-883).
 	const want = "CQZ: 4, GRIDSQUARE: EM10dh, ITUZ: 7, US_COUNTY: Travis, US_STATE: TX"
-	if got := StationDetails(cfg, usStation()); got != want {
-		t.Errorf("StationDetails = %q, want %q", got, want)
+	if got, err := StationDetails(cfg, usStation()); err != nil || got != want {
+		t.Errorf("StationDetails = %q, %v, want %q", got, err, want)
 	}
 }
 
@@ -240,7 +240,10 @@ func TestStationDetailsTruncation(t *testing.T) {
 	cfg := loadTestConfig(t, "config-11.35.xml")
 	st := usStation()
 	st.GridSquare = strings.Repeat("A", 200)
-	got := StationDetails(cfg, st)
+	got, err := StationDetails(cfg, st)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// tqslconvert.cpp:1825-1828 copies loc_details into char stnloc[128].
 	want := ("CQZ: 4, GRIDSQUARE: " + st.GridSquare)[:127]
 	if got != want {
@@ -252,8 +255,8 @@ func TestStationDetailsInvalidStation(t *testing.T) {
 	cfg := loadTestConfig(t, "config-11.35.xml")
 	st := usStation()
 	st.DXCC = 0
-	if got := StationDetails(cfg, st); got != "" {
-		t.Errorf("StationDetails = %q, want empty", got)
+	if got, err := StationDetails(cfg, st); got != "" || !errors.Is(err, ErrInvalidStation) {
+		t.Errorf("StationDetails = %q, %v, want ErrInvalidStation", got, err)
 	}
 }
 
@@ -340,8 +343,8 @@ func TestNilConfigNoPanic(t *testing.T) {
 	if got := QSODetails(cfg, q); got != "" {
 		t.Errorf("QSODetails = %q, want empty", got)
 	}
-	if got := StationDetails(cfg, st); got != "" {
-		t.Errorf("StationDetails = %q, want empty", got)
+	if got, err := StationDetails(cfg, st); got != "" || !errors.Is(err, ErrConfig) {
+		t.Errorf("StationDetails = %q, %v, want ErrConfig", got, err)
 	}
 	if got := DupeKey(cred.Cert, cfg, q); got != "" {
 		t.Errorf("DupeKey = %q, want empty", got)

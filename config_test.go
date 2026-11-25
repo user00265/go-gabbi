@@ -108,6 +108,29 @@ func TestParseConfigFormats(t *testing.T) {
 	}
 }
 
+func TestParseConfigOutOfOrderSectionsWithProlog(t *testing.T) {
+	// TrustedQSL's XMLElementList indexes children by name (xml.h:31,161-166).
+	xml := `<?xml version="1.0"?><tqsldata><tqslconfig majorversion="11" minorversion="34">` +
+		`<locpages><page Id="1" follows="0"><pageField>CALL</pageField></page></locpages>` +
+		`<locfields><field Id="CALL" flags="0" intype="2" label="Call Sign" len="20" type="C" /></locfields>` +
+		`<dxcc><entity arrlId="291" deleted="0" valid="1945-11-15 00:00:00" zonemap="08:05">UNITED STATES OF AMERICA</entity></dxcc>` +
+		`<satellites><satellite name="AO-7" startDate="1974-11-15">AMSAT-OSCAR 7</satellite></satellites>` +
+		`<propmodes><propmode name="SAT">Satellite</propmode></propmodes>` +
+		`<adifmap><adifmode adif-mode="CW" mode="CW">CW</adifmode></adifmap>` +
+		`<modes><mode group="CW">CW</mode></modes><bands><band high="14350" low="14000" spectrum="HF">20M</band></bands>` +
+		`<sigspecs>` + minimalSigspec + `</sigspecs></tqslconfig></tqsldata>`
+	cfg, err := ParseConfig(strings.NewReader(xml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if major, minor := cfg.Version(); major != 11 || minor != 34 {
+		t.Fatalf("Version = %d.%d, want 11.34", major, minor)
+	}
+	if cfg.Sigspec().Name != "LOTW" || !cfg.hasMode("CW") {
+		t.Fatal("out-of-order sections were not decoded")
+	}
+}
+
 func TestParseConfigEquivalent(t *testing.T) {
 	c34 := loadTestConfig(t, "config-11.34.tq6")
 	c35 := loadTestConfig(t, "config-11.35.xml")

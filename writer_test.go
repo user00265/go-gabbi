@@ -765,8 +765,12 @@ func TestWriterPendingFields(t *testing.T) {
 	}
 	norm, _ := cfg.NormalizeQSO(raw, NormalizeOptions{})
 	sd, _ := SignData(cfg, usStation(), norm)
+	details, err := StationDetails(cfg, usStation())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if p.QSO != norm || p.SignData != sd || p.Cert != cred.Cert ||
-		p.StationDetails != StationDetails(cfg, usStation()) {
+		p.StationDetails != details {
 		t.Errorf("pending = %+v", p)
 	}
 	if err := wr.commit(p, true); err != nil {
@@ -935,6 +939,29 @@ func TestWriterNoPreambleOnEarlyError(t *testing.T) {
 	}
 	if err := wr.commit(p, false); err == nil || buf.Len() != 0 {
 		t.Errorf("commit of a zero pending: err %v, %d bytes", err, buf.Len())
+	}
+}
+
+func TestWriterNoPendingOnInvalidQSOOrStation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		qso  QSO
+		st   Station
+	}{
+		{"invalid QSO", QSO{}, usStation()},
+		{"invalid station", writerQSO("W1AW", 1), Station{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			wr := newTestWriter(t, &out)
+			p, err := wr.prepare(newTestCredential(t), tc.st, tc.qso)
+			if err == nil || p.valid || p.preamble != nil || p.contact != nil {
+				t.Fatalf("prepare = %+v, %v; want zero pending and error", p, err)
+			}
+			if err := wr.commit(p, false); err == nil || out.Len() != 0 {
+				t.Fatalf("commit = %v, output bytes = %d", err, out.Len())
+			}
+		})
 	}
 }
 
