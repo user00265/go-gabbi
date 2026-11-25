@@ -124,6 +124,8 @@ type entity struct {
 // error wrapping [ErrConfigOutdated]. Any other problem, including a missing
 // section the signing path needs, wraps [ErrConfig]. Input that decompresses
 // to more than 16 MiB is rejected.
+// Version attributes accept a decimal prefix like TrustedQSL's strtol; unlike
+// TrustedQSL, missing attributes, values without digits and overflows are errors.
 //
 // The library embeds no configuration and downloads nothing. Fetching and
 // storing it is the caller's job:
@@ -509,7 +511,21 @@ func decodeConfig(d *xml.Decoder, start xml.StartElement) (*Config, error) {
 func versionAttr(start xml.StartElement, name string) (int, error) {
 	for _, a := range start.Attr {
 		if a.Name.Local == name {
-			v, err := strconv.Atoi(a.Value)
+			// TrustedQSL reads a decimal prefix with strtol, accepting C
+			// whitespace and ignoring text after the number (location.cpp:492-497).
+			text := strings.TrimLeft(a.Value, " \t\n\v\f\r")
+			i := 0
+			if len(text) > 0 && (text[0] == '+' || text[0] == '-') {
+				i++
+			}
+			start := i
+			for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+				i++
+			}
+			if i == start {
+				return 0, invalid("tqslconfig %s %q is not a number", name, a.Value)
+			}
+			v, err := strconv.Atoi(text[:i])
 			if err != nil {
 				return 0, invalid("tqslconfig %s %q is not a number", name, a.Value)
 			}

@@ -245,6 +245,23 @@ func TestParseConfigMissingVersion(t *testing.T) {
 	}
 }
 
+func TestParseConfigVersionUsesDecimalPrefix(t *testing.T) {
+	// TrustedQSL location.cpp:492-497 uses strtol(..., NULL, 10).
+	base := readTestdata(t, "config-11.35.xml")
+	for _, value := range []string{" 35", "+35", "35suffix"} {
+		t.Run(value, func(t *testing.T) {
+			data := replaceOnce(t, base, `minorversion="35"`, `minorversion="`+value+`"`)
+			cfg, err := ParseConfig(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, minor := cfg.Version(); minor != 35 {
+				t.Fatalf("minor = %d, want 35", minor)
+			}
+		})
+	}
+}
+
 func TestSigspecPicksNewest(t *testing.T) {
 	// config.xml:7816-7848, sigspec LOTW 2.0.
 	wantStation := strings.Fields("AU_STATE CA_PROVINCE CA_US_PARK CN_PROVINCE CQZ DX_US_PARK FI_KUNTA GRIDSQUARE IOTA ITUZ JA_CITY_GUN_KU JA_PREFECTURE RU_OBLAST US_COUNTY US_PARK US_STATE")
