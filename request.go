@@ -81,13 +81,7 @@ func BuildRequest(cfg *Config, req Request, id Ident, random io.Reader) ([]byte,
 		return nil, nil, fmt.Errorf("gabbi: create certificate request: %w", err)
 	}
 	marker := [...]string{"TQSL_CRQ_NEW", "TQSL_CRQ_RENEWAL", "TQSL_CRQ_ADDITIONAL"}[req.Kind]
-	program, version := id.Program, id.Version
-	if program == "" {
-		program = "go-gabbi"
-	}
-	if version == "" {
-		version = "0.0.0"
-	}
+	program, version := resolveIdent(id)
 	major, minor := cfg.Version()
 	name, unit := cfg.Provider()
 	var b strings.Builder
@@ -100,7 +94,7 @@ func BuildRequest(cfg *Config, req Request, id Ident, random io.Reader) ([]byte,
 		}
 		b.WriteString("\n\n")
 	}
-	write("TQSL_IDENT", fmt.Sprintf("%s: %s, Lib: V%s, Config: %d.%d", program, version, version, major, minor))
+	write("TQSL_IDENT", fmt.Sprintf("%s: %s, Lib: V%s, Config: %d.%d", program, version, tqslLibVersion, major, minor))
 	b.WriteString("<" + marker + ">\n\n")
 	for _, f := range []struct{ name, value string }{
 		{"PROVIDER", requestTrim(name)}, {"PROVIDER_UNIT", requestTrim(unit)}, {"EMAIL", req.Email}, {"NAME", req.Name},

@@ -303,7 +303,7 @@ func fieldValue(t testing.TB, fields []requestField, name string) string {
 func TestBuildRequestLayoutNew(t *testing.T) {
 	f, _ := buildTestRequest(t, loadTestConfig(t, "config-11.35.xml"), sampleRequest())
 	// openssl_cert.cpp:627-656 and :700-717; REQUEST is checked separately.
-	want := []requestField{{"TQSL_IDENT", "Logger: 1.2, Lib: V1.2, Config: 11.35"}, {"TQSL_CRQ_NEW", ""}, {"TQSL_CRQ_PROVIDER", "American Radio Relay League"}, {"TQSL_CRQ_PROVIDER_UNIT", "Logbook of the World"}, {"TQSL_CRQ_EMAIL", "john@example.org"}, {"TQSL_CRQ_NAME", "John Q Public"}, {"TQSL_CRQ_ADDRESS1", "1 Main Street"}, {"TQSL_CRQ_ADDRESS2", ""}, {"TQSL_CRQ_CITY", "Doña Ana"}, {"TQSL_CRQ_STATE", "NM"}, {"TQSL_CRQ_POSTAL", "88001"}, {"TQSL_CRQ_COUNTRY", "USA"}, {"TQSL_CRQ_DXCC_ENTITY", "291"}, {"TQSL_CRQ_QSO_NOT_BEFORE", "2020-05-14"}, {"TQSL_CRQ_QSO_NOT_AFTER", "2029-03-19"}, {"TQSL_CRQ_REQUEST", fieldValue(t, f, "TQSL_CRQ_REQUEST")}, {"eor", ""}}
+	want := []requestField{{"TQSL_IDENT", "Logger: 1.2, Lib: V2.8.7, Config: 11.35"}, {"TQSL_CRQ_NEW", ""}, {"TQSL_CRQ_PROVIDER", "American Radio Relay League"}, {"TQSL_CRQ_PROVIDER_UNIT", "Logbook of the World"}, {"TQSL_CRQ_EMAIL", "john@example.org"}, {"TQSL_CRQ_NAME", "John Q Public"}, {"TQSL_CRQ_ADDRESS1", "1 Main Street"}, {"TQSL_CRQ_ADDRESS2", ""}, {"TQSL_CRQ_CITY", "Doña Ana"}, {"TQSL_CRQ_STATE", "NM"}, {"TQSL_CRQ_POSTAL", "88001"}, {"TQSL_CRQ_COUNTRY", "USA"}, {"TQSL_CRQ_DXCC_ENTITY", "291"}, {"TQSL_CRQ_QSO_NOT_BEFORE", "2020-05-14"}, {"TQSL_CRQ_QSO_NOT_AFTER", "2029-03-19"}, {"TQSL_CRQ_REQUEST", fieldValue(t, f, "TQSL_CRQ_REQUEST")}, {"eor", ""}}
 	if !reflect.DeepEqual(f, want) {
 		t.Fatalf("fields:\n%#v\nwant:\n%#v", f, want)
 	}
@@ -324,9 +324,24 @@ func TestBuildRequestOpenEnded(t *testing.T) {
 }
 
 func TestBuildRequestIdent(t *testing.T) {
-	f, _ := buildTestRequest(t, loadTestConfig(t, "config-11.35.xml"), sampleRequest())
-	if got := fieldValue(t, f, "TQSL_IDENT"); got != "Logger: 1.2, Lib: V1.2, Config: 11.35" {
-		t.Fatal(got)
+	cfg := loadTestConfig(t, "config-11.35.xml")
+	defVer := defaultModuleVersion()
+	for _, tt := range []struct {
+		id   Ident
+		want string
+	}{
+		{Ident{Program: "Logger", Version: "1.2"}, "Logger: 1.2, Lib: V" + tqslLibVersion + ", Config: 11.35"},
+		{Ident{Program: "Logger", Version: "v1.2"}, "Logger: 1.2, Lib: V" + tqslLibVersion + ", Config: 11.35"},
+		{Ident{Program: "Logger", Version: "V1.2"}, "Logger: 1.2, Lib: V" + tqslLibVersion + ", Config: 11.35"},
+		{Ident{}, "go-gabbi: " + defVer + ", Lib: V" + tqslLibVersion + ", Config: 11.35"},
+	} {
+		b, _, err := BuildRequest(cfg, sampleRequest(), tt.id, rand.Reader)
+		if err != nil {
+			t.Fatalf("BuildRequest(%+v): %v", tt.id, err)
+		}
+		if got := fieldValue(t, readRequestFields(t, b), "TQSL_IDENT"); got != tt.want {
+			t.Errorf("Ident %+v: TQSL_IDENT = %q, want %q", tt.id, got, tt.want)
+		}
 	}
 }
 

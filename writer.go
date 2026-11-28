@@ -7,23 +7,91 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
 )
 
+const (
+	modulePath     = "github.com/user00265/go-gabbi"
+	defaultVersion = "0.0.0"
+
+	// tqslLibVersion is the tested upstream TrustedQSL version reported in
+	// TQSL_IDENT ("Lib: V<version>"). Update this single constant when
+	// verifying against a newer release; upstream tarballs come from
+	// https://www.arrl.org/tqsl/tqsl-<version>.tar.gz.
+	tqslLibVersion = "2.8.7"
+)
+
 // Ident names the program that wrote a GAbbI file. It fills the TQSL_IDENT
-// record at the top of the output.
+// record at the top of the output, formatting the program version with a
+// leading "V" in .tq8 files and reporting the tested TrustedQSL library
+// version (for example, Lib: V2.8.7).
 type Ident struct {
 	// Program is the program name, such as "MyLogger". Empty means
 	// "go-gabbi".
 	Program string
-	// Version is the program version, such as "1.4.2". Empty means
-	// "0.0.0".
+	// Version is the program version, such as "1.4.2" (a leading "v" or
+	// "V" is stripped). Empty uses this module's version from
+	// [runtime/debug.ReadBuildInfo], falling back to "0.0.0" for
+	// unreleased or devel builds.
 	Version string
 	// AllowDupes says whether QSOs already signed are signed again. It is
 	// only reported in the ident; the Writer keeps no duplicate store.
 	AllowDupes bool
+}
+
+func trimVersionPrefix(v string) string {
+	if len(v) > 0 && (v[0] == 'v' || v[0] == 'V') {
+		return v[1:]
+	}
+	return v
+}
+
+func moduleVersion(info *debug.BuildInfo) string {
+	if info == nil {
+		return defaultVersion
+	}
+	var raw string
+	if info.Main.Path == modulePath {
+		raw = info.Main.Version
+	} else {
+		for _, dep := range info.Deps {
+			if dep != nil && dep.Path == modulePath {
+				if dep.Replace != nil {
+					raw = dep.Replace.Version
+				} else {
+					raw = dep.Version
+				}
+				break
+			}
+		}
+	}
+	if raw == "" || raw == "(devel)" {
+		return defaultVersion
+	}
+	if v := trimVersionPrefix(raw); v != "" {
+		return v
+	}
+	return defaultVersion
+}
+
+func defaultModuleVersion() string {
+	info, _ := debug.ReadBuildInfo()
+	return moduleVersion(info)
+}
+
+func resolveIdent(id Ident) (program, version string) {
+	program = id.Program
+	if program == "" {
+		program = "go-gabbi"
+	}
+	version = trimVersionPrefix(id.Version)
+	if version == "" {
+		version = defaultModuleVersion()
+	}
+	return program, version
 }
 
 // identRecordMax is static char ident[512] in get_ident_rec
@@ -33,9 +101,8 @@ const identRecordMax = 511
 // identRecord returns the TQSL_IDENT record for id and the configuration
 // version: get_ident_rec (tqslconvert.cpp:896-920) up to AllowDupes. The
 // "Source: ... Writer: ..." tail TrustedQSL adds for ADIF and Cabrillo input
-// is left out, as there is no source log. Whether LoTW accepts an ident that
-// does not start with "TQSL V" is an open question; this is the one place
-// to change the text.
+// is left out, as there is no source log. Live LoTW upload accepts the
+// "go-gabbi" program prefix.
 //
 // The text is cut so the whole record, "<TQSL_IDENT:N>text\n", fits in
 // 511 bytes, which leaves 494 bytes of text. TrustedQSL cuts the text at
@@ -45,15 +112,9 @@ const identRecordMax = 511
 // overruns the value. Those malformed records are deliberately not
 // reproduced.
 func identRecord(id Ident, cfg *Config) string {
-	prog, ver := id.Program, id.Version
-	if prog == "" {
-		prog = "go-gabbi"
-	}
-	if ver == "" {
-		ver = "0.0.0"
-	}
+	prog, ver := resolveIdent(id)
 	major, minor := cfg.Version()
-	text := fmt.Sprintf("%s %s Lib: V%s Config: V%d.%d AllowDupes: %t", prog, ver, ver, major, minor, id.AllowDupes)
+	text := fmt.Sprintf("%s V%s Lib: V%s Config: V%d.%d AllowDupes: %t", prog, ver, tqslLibVersion, major, minor, id.AllowDupes)
 	// Overhead is "<TQSL_IDENT:" + digits + ">" + "\n".
 	for len("<TQSL_IDENT:")+len(strconv.Itoa(len(text)))+len(">")+len(text)+len("\n") > identRecordMax {
 		text = text[:len(text)-1]

@@ -115,7 +115,7 @@ func ExampleWriter() {
 		}
 	}
 	// Output:
-	// <TQSL_IDENT:57>ExampleLog 1.0 Lib: V1.0 Config: V11.35 AllowDupes: false
+	// <TQSL_IDENT:60>ExampleLog V1.0 Lib: V2.8.7 Config: V11.35 AllowDupes: false
 	// <Rec_Type:5>tCERT
 	// <Rec_Type:8>tSTATION
 	// <Rec_Type:8>tCONTACT
@@ -203,13 +203,13 @@ func ExampleSign_all() {
 	fmt.Println("store entries:", len(store.m))
 	// Output:
 	// signed 1, duplicates 0
-	// <TQSL_IDENT:57>ExampleLog 1.0 Lib: V1.0 Config: V11.35 AllowDupes: false
+	// <TQSL_IDENT:60>ExampleLog V1.0 Lib: V2.8.7 Config: V11.35 AllowDupes: false
 	// <Rec_Type:5>tCERT
 	// <Rec_Type:8>tSTATION
 	// <Rec_Type:8>tCONTACT
 	// restart after 1 duplicate(s)
 	// signed 2, duplicates 0
-	// <TQSL_IDENT:56>ExampleLog 1.0 Lib: V1.0 Config: V11.35 AllowDupes: true
+	// <TQSL_IDENT:59>ExampleLog V1.0 Lib: V2.8.7 Config: V11.35 AllowDupes: true
 	// <Rec_Type:5>tCERT
 	// <Rec_Type:8>tSTATION
 	// <Rec_Type:8>tCONTACT

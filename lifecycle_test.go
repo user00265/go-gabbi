@@ -198,7 +198,7 @@ func TestLocalCALifecycle(t *testing.T) {
 		t.Fatal("missing TQSL_CRQ_NEW marker in new .tq5")
 	}
 	wantTQ5Fields := map[string]string{
-		"TQSL_IDENT":              "LifecycleTest: 1.0.0, Lib: V1.0.0, Config: 11.35",
+		"TQSL_IDENT":              "LifecycleTest: 1.0.0, Lib: V2.8.7, Config: 11.35",
 		"TQSL_CRQ_DXCC_ENTITY":    "291",
 		"TQSL_CRQ_QSO_NOT_BEFORE": "2020-01-01",
 		"TQSL_CRQ_QSO_NOT_AFTER":  "2035-12-31",
@@ -452,7 +452,7 @@ func TestLocalCALifecycle(t *testing.T) {
 	}
 
 	ident, recs := parseGABBI(t, plainTQ8)
-	const wantTQ8Ident = "LifecycleTest 1.0.0 Lib: V1.0.0 Config: V11.35 AllowDupes: false"
+	const wantTQ8Ident = "LifecycleTest V1.0.0 Lib: V2.8.7 Config: V11.35 AllowDupes: false"
 	if ident != wantTQ8Ident {
 		t.Errorf("TQSL_IDENT = %q, want %q", ident, wantTQ8Ident)
 	}

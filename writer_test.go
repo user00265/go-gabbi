@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"testing"
@@ -245,16 +246,111 @@ func TestWriterRecordSequence(t *testing.T) {
 	}
 }
 
+func TestModuleVersion(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		info *debug.BuildInfo
+		want string
+	}{
+		{
+			name: "nil info",
+			info: nil,
+			want: "0.0.0",
+		},
+		{
+			name: "main devel",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Path: modulePath, Version: "(devel)"},
+			},
+			want: "0.0.0",
+		},
+		{
+			name: "main v0.1.0",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Path: modulePath, Version: "v0.1.0"},
+			},
+			want: "0.1.0",
+		},
+		{
+			name: "main uppercase V",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Path: modulePath, Version: "V0.1.0"},
+			},
+			want: "0.1.0",
+		},
+		{
+			name: "deps v0.1.0",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Path: "example.com/caller", Version: "v1.0.0"},
+				Deps: []*debug.Module{
+					{Path: "example.com/other", Version: "v2.0.0"},
+					{Path: modulePath, Version: "v0.1.0"},
+				},
+			},
+			want: "0.1.0",
+		},
+		{
+			name: "deps replace v0.2.0",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Path: "example.com/caller", Version: "v1.0.0"},
+				Deps: []*debug.Module{
+					{
+						Path:    modulePath,
+						Version: "v0.1.0",
+						Replace: &debug.Module{Path: modulePath, Version: "v0.2.0"},
+					},
+				},
+			},
+			want: "0.2.0",
+		},
+		{
+			name: "deps replace devel",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Path: "example.com/caller", Version: "v1.0.0"},
+				Deps: []*debug.Module{
+					{
+						Path:    modulePath,
+						Version: "v0.1.0",
+						Replace: &debug.Module{Path: "../go-gabbi", Version: "(devel)"},
+					},
+				},
+			},
+			want: "0.0.0",
+		},
+		{
+			name: "missing module",
+			info: &debug.BuildInfo{
+				Main: debug.Module{Path: "example.com/caller", Version: "v1.0.0"},
+				Deps: []*debug.Module{
+					{Path: "example.com/other", Version: "v2.0.0"},
+				},
+			},
+			want: "0.0.0",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := moduleVersion(tt.info); got != tt.want {
+				t.Errorf("moduleVersion() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWriterIdent(t *testing.T) {
 	cfg := loadTestConfig(t, "config-11.35.xml")
+	defVer := defaultModuleVersion()
 	// get_ident_rec (tqslconvert.cpp:904-916) up to AllowDupes, with the
 	// config version from tqsl_getConfigVersion (tqslconvert.cpp:900).
 	for _, tt := range []struct {
 		id   Ident
 		want string
 	}{
-		{Ident{Program: "MyLog", Version: "1.2.3"}, "MyLog 1.2.3 Lib: V1.2.3 Config: V11.35 AllowDupes: false"},
-		{Ident{AllowDupes: true}, "go-gabbi 0.0.0 Lib: V0.0.0 Config: V11.35 AllowDupes: true"},
+		{Ident{}, "go-gabbi V" + defVer + " Lib: V" + tqslLibVersion + " Config: V11.35 AllowDupes: false"},
+		{Ident{AllowDupes: true}, "go-gabbi V" + defVer + " Lib: V" + tqslLibVersion + " Config: V11.35 AllowDupes: true"},
+		{Ident{Program: "MyLog", Version: "1.2.3"}, "MyLog V1.2.3 Lib: V" + tqslLibVersion + " Config: V11.35 AllowDupes: false"},
+		{Ident{Program: "MyLog", Version: "v1.2.3"}, "MyLog V1.2.3 Lib: V" + tqslLibVersion + " Config: V11.35 AllowDupes: false"},
+		{Ident{Program: "MyLog", Version: "V1.2.3"}, "MyLog V1.2.3 Lib: V" + tqslLibVersion + " Config: V11.35 AllowDupes: false"},
+		{Ident{Program: "MyLog", Version: "V"}, "MyLog V" + defVer + " Lib: V" + tqslLibVersion + " Config: V11.35 AllowDupes: false"},
 	} {
 		var buf bytes.Buffer
 		wr := NewWriter(&buf, cfg, tt.id, NormalizeOptions{})
@@ -273,7 +369,7 @@ func TestWriterIdentTruncated(t *testing.T) {
 	// record must also stay well formed: the length prefix matches the
 	// value and the newline is kept. With a 3-digit length that leaves 494
 	// bytes of text.
-	const tail = " 0.0.0 Lib: V0.0.0 Config: V11.35 AllowDupes: false"
+	tail := " V" + defaultModuleVersion() + " Lib: V" + tqslLibVersion + " Config: V11.35 AllowDupes: false"
 	for _, n := range []int{1, 400, 494 - len(tail), 495 - len(tail), 511 - len(tail), 600} {
 		full := strings.Repeat("P", n) + tail
 		got := identRecord(Ident{Program: strings.Repeat("P", n)}, cfg)
