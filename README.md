@@ -4,17 +4,32 @@ go-gabbi implements the TrustedQSL / GAbbI signing and certificate formats used 
 
 This project is independent and is not affiliated with or endorsed by ARRL.
 
-go-gabbi is a pure-Go library. It loads a TrustedQSL `.p12` callsign
-certificate and signs QSO records into the GAbbI text that a `.tq8` file
-holds. It has no binary, reads no files and makes no network calls. Your
-application owns the streams, the keys, the duplicate store and the
-configuration.
+go-gabbi is a pure-Go library (`CGO_ENABLED=0`) with no binary. It loads `.p12`
+and `.tq6` callsign certificates, verifies certificate chains, pairs incoming
+certificates with keys, exports `.p12` bundles, builds `.tq5` certificate
+requests (new, renewal, and additional), and signs QSO records into `.tq8`
+files. The root package reads no files and makes no network calls. Your
+application owns the streams, keys, duplicate store, and configuration.
+
+An optional `service` subpackage (`github.com/user00265/go-gabbi/service`)
+handles HTTP calls using your `*http.Client`: uploading `.tq8` logs and `.tq5`
+requests, checking certificate status, downloading QSL confirmations, and
+fetching user activity.
 
 ## Install
 
 ```sh
 go get github.com/user00265/go-gabbi
 ```
+
+## Certificate lifecycle
+
+- Load an existing `.p12` with `LoadPKCS12`, or parse a `.tq6` with `ParseTQ6`.
+- Check chains against caller-supplied roots with `VerifyChain`.
+- Build `.tq5` requests with `BuildRequest`, pair the returned `.tq6` with
+  `Pair`, and export a TrustedQSL-compatible `.p12` with `ExportPKCS12`.
+- Requesting a renewal before a certificate expires immediately invalidates the
+  existing certificate. Show `RenewalWarning` before submitting a renewal.
 
 ## Configuration
 
