@@ -54,3 +54,12 @@ To verify freshly generated output without replacing the checked-in fixtures:
 ```sh
 GABBI_TQ8_FIXTURE_DIR=EMPTY_OUTPUT_DIRECTORY CGO_ENABLED=0 go test -run TestSignTrustedQSLGolden -count=1
 ```
+
+## Same-key interop verification
+
+`just interop` (or `sh testdata/tq8/verify-interop.sh`) runs an offline,
+same-key cross-implementation check between `go-gabbi` and Debian
+`trustedqsl` 2.8.7-1 using disposable keys in a temporary directory. It
+verifies `.p12` import (empty and non-empty passwords), `.tq6` certificate
+store restoration, superseded-certificate exclusion, `MFSK`/`FT4` submode
+mapping, and byte-for-byte `SIGNDATA` and `SIGN_LOTW_V2.0` signature parity.

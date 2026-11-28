@@ -33,6 +33,10 @@ fixtures:
     @echo "Generate .tq5 fixtures: sh testdata/tq5/generate.sh EMPTY_OUTPUT_DIRECTORY"
     @echo "Generate .tq8 fixtures: sh testdata/tq8/generate.sh EMPTY_OUTPUT_DIRECTORY"
 
+# Run offline cross-implementation interop checks against the pinned tqsl container.
+interop:
+    sh testdata/tq8/verify-interop.sh
+
 # Fail if the global gitignore hides any required path.
 doctor:
     #!/usr/bin/env bash
