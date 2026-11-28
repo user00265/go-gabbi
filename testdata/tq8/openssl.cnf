@@ -1,0 +1,24 @@
+oid_section = custom_oids
+[custom_oids]
+AROcallsign = 1.3.6.1.4.1.12348.1.1
+[req]
+distinguished_name = dn
+[dn]
+[cert_single]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+1.3.6.1.4.1.12348.1.2 = DER:323032302d30312d3031
+1.3.6.1.4.1.12348.1.3 = DER:323033352d31322d3331
+1.3.6.1.4.1.12348.1.4 = DER:323931
+[cert_a]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+1.3.6.1.4.1.12348.1.2 = DER:323032302d30312d3031
+1.3.6.1.4.1.12348.1.3 = DER:323032352d31322d3331
+1.3.6.1.4.1.12348.1.4 = DER:323931
+[cert_b]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
+1.3.6.1.4.1.12348.1.2 = DER:323032362d30312d3031
+1.3.6.1.4.1.12348.1.3 = DER:323033352d31322d3331
+1.3.6.1.4.1.12348.1.4 = DER:323931
