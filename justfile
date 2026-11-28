@@ -41,7 +41,7 @@ interop:
 doctor:
     #!/usr/bin/env bash
     set -uo pipefail
-    paths="go.mod justfile .golangci.yml .gitignore README.md LICENSE NOTICE doc.go testdata/ internal/ .github/"
+    paths="go.mod justfile .golangci.yml .goreleaser.yaml .gitignore README.md LICENSE NOTICE doc.go testdata/ internal/ .github/"
     git check-ignore -v --no-index $paths
     status=$?
     case $status in

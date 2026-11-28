@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema-pro.json
+version: 2
+pro: true
+
+project_name: go-gabbi
+
+builds:
+  - skip: true
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([^)]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([^)]+\))??!?:.+$'
+      order: 1
+    - title: Documentation
+      regexp: '^.*?docs(\([^)]+\))??!?:.+$'
+      order: 2
+    - title: Tests
+      regexp: '^.*?test(\([^)]+\))??!?:.+$'
+      order: 3
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^Merge pull request'
+      - '^Merge branch'
+
+release:
+  github:
+    owner: user00265
+    name: go-gabbi
+  draft: false
+  prerelease: auto
+  name_template: '{{ .Tag }}'
