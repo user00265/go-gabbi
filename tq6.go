@@ -244,8 +244,8 @@ func Pair(users []*x509.Certificate, key crypto.Signer) (Credential, error) {
 // PBES2 encryption, a shrouded key bag, and a localKeyID linking the key to
 // the certificate. TrustedQSL needs the MAC and the shrouded key bag, and
 // uses the localKeyID to find the key's certificate. Pass the ARRL CA chain:
-// TrustedQSL verifies the certificate against it on import. Whether
-// TrustedQSL imports this file has not yet been checked against tqsl itself.
+// TrustedQSL verifies the certificate against it on import. Verified against
+// Debian TrustedQSL 2.8.7-1 for both empty and non-empty passwords.
 //
 // c must pass the [NewCredential] checks, or the error wraps the sentinel
 // NewCredential documents. The key must also be held in memory as an

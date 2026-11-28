@@ -427,7 +427,7 @@ func TestWriterSecondCert(t *testing.T) {
 	if got := rs[7].uid(t, "CERT_UID"); got != 2 {
 		t.Errorf("third tSTATION CERT_UID = %d, want 2", got)
 	}
-	// unverified: fixture phase confirms (knowledge §3.3)
+	// Verified against TrustedQSL 2.8.7-1 in testdata/tq8/switch.gabbi.
 	// Going back to cert 1 takes the else branch (tqslconvert.cpp:1577-1579):
 	// cert_uid is reused and need_station_rec stays false, so no tCERT or
 	// tSTATION, and the tCONTACT keeps loc_uid 3.
@@ -813,7 +813,7 @@ func TestWriterPendingFields(t *testing.T) {
 }
 
 func TestWriterDuplicateKeepsPreamble(t *testing.T) {
-	// unverified: fixture phase confirms
+	// Verified against TrustedQSL 2.8.7-1 in testdata/tq8/dupe-preamble.gabbi.
 	// tqsl_getConverterGABBI returns tCERT (tqslconvert.cpp:1562-1580) and
 	// tSTATION (1813-1816) as separate records, and apps/tqsl.cpp:2363-2373
 	// writes each as soon as it is returned. The duplicate check comes after
